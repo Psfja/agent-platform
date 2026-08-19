@@ -1,0 +1,33 @@
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ArrowLeft, ArrowRightLeft, Check, ChevronDown, Code2, Database, FileCode2, FileDiff, GitBranch, RotateCcw, Search, Server, ShieldCheck } from 'lucide-vue-next'
+import { api } from '../api/client'
+import { useAppStore } from '../stores/app'
+import StatusBadge from '../components/StatusBadge.vue'
+
+const route=useRoute();const router=useRouter();const app=useAppStore();const projectId=String(route.params.id);const from=ref(String(route.query.from||'v1.1.1'));const to=ref(String(route.query.to||'v1.2.0'));const tab=ref('code');const selectedFile=ref('backend/app/services/approval.py');
+const summary=ref({files:18,added:1126,removed:241});const schemaCount=ref(2);const apiCount=ref(3)
+const files=ref([{name:'backend/app/services/approval.py',type:'M',add:84,del:31},{name:'backend/app/api/approval.py',type:'M',add:42,del:12},{name:'backend/app/models/workflow.py',type:'M',add:37,del:8},{name:'frontend/src/views/ApprovalConfig.vue',type:'M',add:126,del:46},{name:'frontend/src/components/StepEditor.vue',type:'A',add:218,del:0},{name:'tests/test_three_level.py',type:'A',add:164,del:0}])
+async function load(){try{const result=await api.compare(projectId,from.value,to.value);summary.value=result.summary;schemaCount.value=result.schemaChanges.length;apiCount.value=result.apiChanges.length;files.value=result.files.map(item=>({name:item.path,type:item.type,add:item.added,del:item.removed}));selectedFile.value=files.value[0]?.name||''}catch(error){app.toast('对比数据提示',error instanceof Error?error.message:'继续显示本地演示数据')}}
+async function swap(){const v=from.value;from.value=to.value;to.value=v;await load()}
+async function rollback(){if(!window.confirm(`确认回滚到 ${from.value}？系统将执行数据库兼容检查和冒烟测试。`))return;try{const result=await api.rollback(projectId,from.value,true);app.toast('回滚已启动',`${result.steps.length} 个安全步骤正在执行。`)}catch(error){app.toast('回滚失败',error instanceof Error?error.message:'请稍后重试')}}
+onMounted(load)
+</script>
+
+<template>
+  <div class="compare-page">
+    <div class="content-width compare-head"><button class="back-link" @click="router.push(`/projects/${route.params.id}/iterations`)"><ArrowLeft :size="16"/>返回迭代历史</button><div class="compare-title"><div><h1>版本对比</h1><p>查看代码、数据库 Schema 与 API 接口的增量变化。</p></div><button class="button danger-ghost" @click="rollback"><RotateCcw :size="16"/>回滚到 {{from}}</button></div>
+      <section class="version-select-bar"><div class="version-select"><small>基准版本</small><button><GitBranch :size="16"/><strong>{{from}}</strong><span>2026-08-07</span><ChevronDown :size="15"/></button></div><button class="swap-button" @click="swap"><ArrowRightLeft :size="18"/></button><div class="version-select"><small>目标版本</small><button><GitBranch :size="16"/><strong>{{to}}</strong><span>2026-08-12</span><ChevronDown :size="15"/></button></div><div class="compare-summary"><div><span class="summary-added">+{{summary.added.toLocaleString()}}</span><small>新增行</small></div><div><span class="summary-removed">−{{summary.removed.toLocaleString()}}</span><small>删除行</small></div><div><strong>{{summary.files}}</strong><small>变更文件</small></div></div></section>
+      <div class="compare-tabs"><button :class="{active:tab==='code'}" @click="tab='code'"><Code2 :size="16"/>代码变更 <span>18</span></button><button :class="{active:tab==='schema'}" @click="tab='schema'"><Database :size="16"/>Schema 变更 <span>2</span></button><button :class="{active:tab==='api'}" @click="tab='api'"><Server :size="16"/>API 变更 <span>3</span></button><button :class="{active:tab==='features'}" @click="tab='features'"><ShieldCheck :size="16"/>功能清单</button></div>
+    </div>
+    <div v-if="tab==='code'" class="diff-workspace">
+      <aside class="file-diff-tree"><div class="file-tree-head"><strong>变更文件</strong><span>18</span></div><div class="file-search"><Search :size="14"/><input placeholder="搜索文件"/></div><div class="folder-row"><ChevronDown :size="14"/><strong>backend / app</strong><span>8</span></div><button v-for="file in files" :key="file.name" :class="{active:selectedFile===file.name}" @click="selectedFile=file.name"><FileCode2 :size="15"/><div><span>{{file.name.split('/').pop()}}</span><small>{{file.name.split('/').slice(0,-1).join('/')}}</small></div><em :class="file.type==='A'?'added':'modified'">{{file.type}}</em><b class="add">+{{file.add}}</b><b v-if="file.del" class="del">−{{file.del}}</b></button></aside>
+      <section class="code-diff-panel"><header><div><FileDiff :size="17"/><strong>{{selectedFile}}</strong><StatusBadge status="testing" label="已修改"/></div><span>隐藏空白字符</span></header><div class="diff-columns-head"><div><span>{{from}}</span><small>原始文件</small></div><div><span>{{to}}</span><small>变更后</small></div></div><div class="split-diff">
+        <div class="code-side old"><div v-for="line in 14" :key="line" :class="{'removed-line':[4,5,6,9].includes(line)}"><i>{{line+38}}</i><span>{{[4,5,6].includes(line)?'-':' '}}</span><code v-html="line===3?'def <b>resolve_approvers</b>(request, policy):':line===4?'    levels = [policy.first_level]':line===5?'    if policy.second_level:':line===6?'        levels.append(policy.second_level)':line===9?'    return [resolve_user(x) for x in levels]':line===12?'def validate_approval_chain(chain):':'    '+(line%3===0?'return chain':'# approval workflow')"></code></div></div>
+        <div class="code-side new"><div v-for="line in 18" :key="line" :class="{'added-line':[4,5,6,7,8,10,11,12].includes(line)}"><i>{{line+38}}</i><span>{{[4,5,6,7,8,10,11,12].includes(line)?'+':' '}}</span><code v-html="line===3?'def <b>resolve_approvers</b>(request, policy):':line===4?'    levels = policy.enabled_levels':line===5?'    if not levels:':line===6?`        raise ConfigError('审批链不能为空')`:line===7?'    context = ApprovalContext.from_request(request)':line===8?'    approvers = []':line===10?'    for level in levels:':line===11?'        approver = resolver.resolve(level, context)':line===12?'        approvers.append(approver)':line===14?'    return ensure_unique(approvers)':line===17?'def validate_approval_chain(chain):':'    '+(line%3===0?'return chain':'# configurable workflow')"></code></div></div>
+      </div></section>
+    </div>
+    <div v-else class="content-width compare-placeholder"><span><component :is="tab==='schema'?Database:tab==='api'?Server:ShieldCheck" :size="28"/></span><h3>{{tab==='schema'?'Schema 变更':tab==='api'?'API 接口变更':'功能清单变化'}}</h3><p>{{tab==='schema'?'新增 approval_policy.levels JSONB 扩展字段与查询索引，保持向前兼容。':tab==='api'?'新增 2 个接口，修改 1 个接口；无删除和破坏性签名变更。':'新增三级审批配置与审批链预览，保留原两级审批全部能力。'}}</p><div class="safe-change"><Check :size="16"/>未检测到破坏性变更</div></div>
+  </div>
+</template>

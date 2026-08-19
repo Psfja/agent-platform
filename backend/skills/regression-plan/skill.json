@@ -1,0 +1,19 @@
+{
+  "name": "regression-plan",
+  "display_name": "回归测试计划",
+  "version": "1.0.0",
+  "description": "根据受影响模块和变更风险生成分层回归测试计划。",
+  "instructions": "SKILL.md",
+  "entrypoint": "main.py",
+  "agent_types": ["test-engineer", "code-reviewer", "project-manager"],
+  "tags": ["testing", "regression", "quality"],
+  "input_schema": {
+    "type": "object",
+    "required": ["changed_modules"],
+    "properties": {
+      "changed_modules": {"type": "array"},
+      "risk_level": {"type": "string"},
+      "existing_tests": {"type": "array"}
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "requirement-analysis",
+  "display_name": "结构化需求分析",
+  "version": "1.0.0",
+  "description": "识别业务场景、角色、功能、约束和待澄清问题。",
+  "instructions": "SKILL.md",
+  "entrypoint": "main.py",
+  "agent_types": ["project-manager", "requirement-analyst"],
+  "tags": ["requirements", "analysis", "ears"],
+  "input_schema": {
+    "type": "object",
+    "required": ["requirement"],
+    "properties": {
+      "requirement": {"type": "string"},
+      "project_name": {"type": "string"}
+    }
+  }
+}

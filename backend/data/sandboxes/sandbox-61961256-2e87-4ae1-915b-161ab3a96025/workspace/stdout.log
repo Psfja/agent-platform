@@ -1,0 +1,1 @@
+{"projectName": "费用报销系统", "summary": "员工提交费用报销，部门负责人审批，财务管理员复核并导出统计报表，需要记录审计日志", "roles": ["员工", "管理员", "负责人"], "capabilities": ["审批", "导出", "统计"], "clarificationQuestions": ["是否有性能、安全或并发方面的非功能要求？"], "completenessScore": 79, "strategy": "保留原始需求，缺失信息通过澄清问题补齐。"}

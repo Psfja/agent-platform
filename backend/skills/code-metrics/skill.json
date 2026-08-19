@@ -1,0 +1,18 @@
+{
+  "name": "code-metrics",
+  "display_name": "代码变更度量",
+  "version": "1.0.0",
+  "description": "对代码文本计算行数、函数、类、注释和复杂度近似指标。",
+  "instructions": "SKILL.md",
+  "entrypoint": "main.py",
+  "agent_types": ["backend-developer", "frontend-developer", "code-reviewer"],
+  "tags": ["code", "review", "metrics"],
+  "input_schema": {
+    "type": "object",
+    "required": ["code"],
+    "properties": {
+      "code": {"type": "string"},
+      "language": {"type": "string"}
+    }
+  }
+}
