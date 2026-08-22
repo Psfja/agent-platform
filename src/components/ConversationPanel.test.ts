@@ -25,13 +25,17 @@ vi.mock('../api/client', () => ({
     sendConversationMessage: vi.fn(),
     streamConversationMessage: vi.fn(),
     regenerateConversationTitle: vi.fn(),
+    setConversationMode: vi.fn(),
+    conversationInterrupts: vi.fn(),
+    decideConversationInterrupt: vi.fn(),
+    conversationWorkspace: vi.fn(),
   },
 }))
 
 const AGENTS = [
   { id: 'a1', name: 'project-manager', displayName: '项目经理', description: '', systemPrompt: 'p', model: 'm', tools: [], skills: [], sandboxConfig: {}, version: 1, isTemplate: true, isActive: true, createdAt: '', updatedAt: '' },
 ]
-const CONVERSATION = { id: 'c1', projectId: 'leave-hub', agentKey: 'project-manager', title: '需求讨论', createdAt: '2026-08-20T08:00:00Z', updatedAt: '2026-08-20T09:00:00Z', lastMessageAt: '2026-08-20T09:00:00Z', messageCount: 2 }
+const CONVERSATION = { id: 'c1', projectId: 'leave-hub', agentKey: 'project-manager', mode: 'chat', title: '需求讨论', createdAt: '2026-08-20T08:00:00Z', updatedAt: '2026-08-20T09:00:00Z', lastMessageAt: '2026-08-20T09:00:00Z', messageCount: 2 }
 const DETAIL = {
   ...CONVERSATION,
   messages: [
@@ -60,6 +64,8 @@ describe('ConversationPanel', () => {
     vi.mocked(api.agentTypes).mockResolvedValue(AGENTS as never)
     vi.mocked(api.conversations).mockResolvedValue([CONVERSATION] as never)
     vi.mocked(api.conversation).mockResolvedValue(DETAIL as never)
+    vi.mocked(api.conversationInterrupts).mockResolvedValue([] as never)
+    vi.mocked(api.conversationWorkspace).mockResolvedValue({ files: [] } as never)
   })
 
   it('加载会话列表并展示历史消息', async () => {
@@ -137,6 +143,41 @@ describe('ConversationPanel', () => {
     await flushPromises()
     expect(vi.mocked(api.createConversation)).toHaveBeenCalledWith('leave-hub', 'project-manager')
     expect(wrapper.text()).toContain('开始和这个智能体对话吧')
+  })
+
+  it('切换工具模式调用 setConversationMode', async () => {
+    vi.mocked(api.setConversationMode).mockResolvedValue({ ...CONVERSATION, mode: 'agent' } as never)
+    const wrapper = await mountPanel()
+    const buttons = wrapper.findAll('.mode-switch button')
+    await buttons[1].trigger('click')
+    await flushPromises()
+    expect(vi.mocked(api.setConversationMode)).toHaveBeenCalledWith('leave-hub', 'c1', 'agent')
+    // 工具模式按钮高亮
+    expect(buttons[1].classes()).toContain('active')
+  })
+
+  it('流式中断后展示审批卡片，批准后插入恢复消息', async () => {
+    vi.mocked(api.streamConversationMessage).mockImplementation(async (_p, _c, _content, _remember, handlers) => {
+      handlers?.onDelta?.('我将执行部署操作。')
+      handlers?.onInterrupt?.({ interruptId: 'int-1', toolName: 'request_production_deployment', payload: { version: 'v1.0', summary: '对话产物' } })
+      return { ...STREAM_DONE, assistantMessage: null, interrupt: { toolName: 'request_production_deployment', payload: { version: 'v1.0' } } }
+    })
+    vi.mocked(api.decideConversationInterrupt).mockResolvedValue({
+      conversation: { ...CONVERSATION, mode: 'agent', messageCount: 5 },
+      assistantMessage: { id: 'm9', role: 'assistant', content: '已按审批意见完成部署。', metadata: {}, createdAt: '' },
+    } as never)
+    const wrapper = await mountPanel()
+    await wrapper.find('.conversation-input textarea').setValue('请部署到生产')
+    await wrapper.find('.conversation-input .button').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('待人工审批')
+    expect(wrapper.text()).toContain('request_production_deployment')
+    // 批准
+    await wrapper.findAll('.conversation-interrupt footer button').find(b => b.text().trim() === '批准')!.trigger('click')
+    await flushPromises()
+    expect(vi.mocked(api.decideConversationInterrupt)).toHaveBeenCalledWith('leave-hub', 'c1', 'int-1', 'approve', '', {})
+    expect(wrapper.text()).toContain('已按审批意见完成部署。')
+    expect(wrapper.text()).not.toContain('待人工审批')
   })
 
   it('删除会话并清空当前视图', async () => {

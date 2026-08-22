@@ -325,6 +325,88 @@ def test_conversation_stream_reports_llm_not_configured_as_sse_error(client):
     assert events[-1]["code"] == "LLM_NOT_CONFIGURED"
 
 
+def test_conversation_agent_mode_with_stubbed_deepagents(client, monkeypatch):
+    """工具模式：DeepAgents 流式输出 → HITL 中断 → 人工审批 → 恢复执行 → 工作区文件。"""
+    import json as json_module
+
+    import app.services.conversation_agent as conversation_agent_module
+
+    class FakeState:
+        def __init__(self, interrupts=None, messages=None):
+            self.tasks = [type("T", (), {"interrupts": interrupts or []})()]
+            self.values = {"messages": messages or []}
+
+    class FakeChunk:
+        def __init__(self, text): self.content = text
+
+    class FakeDeepAgent:
+        def __init__(self):
+            self.config = None
+            self.invoked = False
+        def stream(self, input, config, stream_mode="messages"):
+            self.config = config
+            for text in ["我将先", "检查工作区", "并生成脚本。"]:
+                yield (FakeChunk(text), {})
+        def get_state(self, config):
+            if not self.invoked:
+                return FakeState(interrupts=[type("I", (), {"value": {"version": "v1.0", "summary": "对话产出的应用"}})()])
+            return FakeState(messages=[type("M", (), {"type": "ai", "content": "已按审批意见完成部署。"})()])
+        def invoke(self, command, config):
+            self.invoked = True
+            return {"messages": [type("M", (), {"type": "ai", "content": "已按审批意见完成部署。"})()]}
+
+    fake = FakeDeepAgent()
+    monkeypatch.setattr(conversation_agent_module, "create_deep_agent", lambda **kwargs: fake)
+    # 关键：无 Key 时 chat 模式会 503，但 fake 路径不走真实模型；给 settings 假 Key 以通过守卫
+    monkeypatch.setenv("LLM_API_KEY", "fake-key-for-stub-test")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+
+    created = client.post("/api/v1/projects/leave-hub/conversations", json={"agentKey": "project-manager"})
+    conversation_id = created.json()["id"]
+    # 切换到工具模式
+    switched = client.patch(f"/api/v1/projects/leave-hub/conversations/{conversation_id}", json={"mode": "agent"})
+    assert switched.status_code == 200 and switched.json()["mode"] == "agent"
+
+    events: list[dict] = []
+    with client.stream("POST", f"/api/v1/projects/leave-hub/conversations/{conversation_id}/messages/stream", json={"content": "请帮我做一个导出脚本并部署", "remember": False}) as response:
+        assert response.status_code == 200, response.text
+        for line in response.iter_lines():
+            if line.startswith("data: "):
+                events.append(json_module.loads(line[6:]))
+    types = [e["type"] for e in events]
+    assert types[0] == "meta" and events[0]["context"]["mode"] == "agent"
+    assert "".join(e["content"] for e in events if e["type"] == "delta") == "我将先检查工作区并生成脚本。"
+    interrupt_event = next(e for e in events if e["type"] == "interrupt")
+    assert interrupt_event["toolName"] == "pending_approval"
+    assert events[-1]["type"] == "done"
+
+    # 待审批列表
+    interrupts = client.get(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/interrupts")
+    assert interrupts.status_code == 200 and len(interrupts.json()) == 1
+    interrupt_id = interrupts.json()[0]["id"]
+
+    # 人工批准 → Agent 恢复执行
+    decided = client.post(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/interrupts/{interrupt_id}/decide", json={"decision": "approve", "reason": "可以发布"})
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["assistantMessage"]["content"] == "已按审批意见完成部署。"
+    assert fake.invoked is True
+
+    # 中断已消费
+    assert client.get(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/interrupts").json() == []
+
+    # 工作区文件（Agent 工作目录，仅返回文件清单）
+    workspace = client.get(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/workspace")
+    assert workspace.status_code == 200 and "files" in workspace.json()
+
+    # 无 Key 时工具模式明确报错（清理 fake key）
+    monkeypatch.delenv("LLM_API_KEY")
+    get_settings.cache_clear()
+    second = client.post(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/messages/stream", json={"content": "继续"})
+    events2 = [json_module.loads(line[6:]) for line in second.iter_lines() if line.startswith("data: ")]
+    assert events2[-1]["type"] == "error" and events2[-1]["code"] == "LLM_NOT_CONFIGURED"
+
+
 def test_conversation_requires_configured_llm(client):
     created = client.post("/api/v1/projects/leave-hub/conversations", json={"agentKey": "project-manager"})
     assert created.status_code == 201
@@ -695,3 +777,69 @@ def test_real_agent_build_loop_with_scripted_model(client, monkeypatch, tmp_path
         assert queued_build["mode"] == "incremental"
     finally:
         object.__setattr__(settings, "agent_build_root", original_root)
+
+
+def test_langgraph_checkpointer_selection_and_semantic_rerank(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from app.services.deepagents_runtime import build_langgraph_checkpointer
+
+    # SQLite：默认返回 SqliteSaver
+    settings = SimpleNamespace(
+        database_url="sqlite:///./data/x.db",
+        langgraph_checkpoint_db=tmp_path / "cp.sqlite",
+    )
+    saver = build_langgraph_checkpointer(settings)
+    assert saver.__class__.__name__ == "SqliteSaver"
+    assert (tmp_path / "cp.sqlite").exists()
+
+    # PostgreSQL：连接失败时回退 SQLite 而不是抛异常
+    import psycopg
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **k: (_ for _ in ()).throw(ConnectionError("no server")))
+    pg_settings = SimpleNamespace(
+        database_url="postgresql+psycopg://user:pw@localhost:5432/db",
+        langgraph_checkpoint_db=tmp_path / "cp2.sqlite",
+    )
+    fallback = build_langgraph_checkpointer(pg_settings)
+    assert fallback.__class__.__name__ == "SqliteSaver"
+
+    # 语义重排：embedding 可用时混合排序；不可用时保持关键词顺序
+    from app.models import AgentMemory
+    from app.services.memory import MemoryService
+
+    def make(key: str, content: str, importance: float = 0.5) -> AgentMemory:
+        item = AgentMemory(agent_key="a", scope="project", memory_type="semantic", key=key, content=content, importance=importance)
+        item.id = key
+        return item
+
+    candidates = [make("export", "导出功能限制五万条"), make("unrelated", "公司食堂菜单")]
+    # 注入假 embedding 客户端
+    import app.services.memory as memory_module
+    import app.services.llm_client as llm_client_module
+
+    class FakeEmbedClient:
+        def embed_query(self, text: str):
+            if "导出" in text:
+                return [1.0, 0.0]
+            if "食堂" in text:
+                return [0.0, 1.0]
+            if "限制" in text or "菜单" in text:
+                return [0.9, 0.1] if "限制" in text else [0.1, 0.9]
+            return None
+
+    monkeypatch.setattr(llm_client_module, "OpenAICompatibleClient", lambda: FakeEmbedClient())
+    ranked = MemoryService._semantic_rerank(candidates, "导出功能")
+    assert ranked[0].key == "export"  # 语义相关者排前
+
+    # embedding 不可用：保持原顺序（不报错）
+    class NoEmbedClient:
+        def embed_query(self, text):
+            return None
+
+    monkeypatch.setattr(llm_client_module, "OpenAICompatibleClient", lambda: NoEmbedClient())
+    same = MemoryService._semantic_rerank(candidates, "导出功能")
+    assert [item.key for item in same] == ["export", "unrelated"]
+
+    # 余弦相似度纯函数
+    assert abs(MemoryService._cosine([1.0, 0.0], [1.0, 0.0]) - 1.0) < 1e-9
+    assert abs(MemoryService._cosine([1.0, 0.0], [0.0, 1.0])) < 1e-9

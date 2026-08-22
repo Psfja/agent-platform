@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 from app.core.auth import audit, get_current_user
 from app.core.errors import conflict, not_found
 from app.database import get_db
-from app.models import AgentType, Conversation, ConversationMessage, User
+from app.models import AgentType, Conversation, ConversationInterrupt, ConversationMessage, User
 from app.schemas import (
+    AgentDecisionResponse,
     ChatTurnResponse,
     ConversationCreate,
     ConversationDetailResponse,
@@ -17,8 +18,11 @@ from app.schemas import (
     ConversationMessageResponse,
     ConversationResponse,
     ConversationUpdate,
+    InterruptDecideRequest,
+    InterruptResponse,
 )
 from app.services.conversation import conversation_response as build_conversation_response, conversation_service
+from app.services.conversation_agent import conversation_agent_runtime
 
 router = APIRouter(tags=["conversations"])
 
@@ -87,9 +91,13 @@ def get_conversation(project_id: str, conversation_id: str, db: Session = Depend
 
 
 @router.patch("/projects/{project_id}/conversations/{conversation_id}", response_model=ConversationResponse)
-def update_conversation(project_id: str, conversation_id: str, payload: ConversationUpdate, db: Session = Depends(get_db)) -> ConversationResponse:
+def update_conversation(project_id: str, conversation_id: str, payload: ConversationUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> ConversationResponse:
     item = _get_conversation_or_404(db, project_id, conversation_id)
-    item.title = payload.title.strip()[:200]
+    if payload.title is not None:
+        item.title = payload.title.strip()[:200]
+    if payload.mode is not None:
+        item.mode = payload.mode
+    audit(db, user, "conversation.update", project_id=project_id, resource_type="conversation", resource_id=item.id, metadata={"mode": item.mode})
     db.commit()
     db.refresh(item)
     return ConversationResponse(**build_conversation_response(db, item))
@@ -123,10 +131,14 @@ def stream_message(project_id: str, conversation_id: str, payload: ConversationM
     item = _get_conversation_or_404(db, project_id, conversation_id)
     agent = _get_agent_or_404(db, item.agent_key)
     client_ip = request.client.host if request.client else ""
-    stream = conversation_service.stream_message(
-        project_id, conversation_id, agent, payload.content,
-        remember=payload.remember, user_id=user.id, client_ip=client_ip,
-    )
+    if item.mode == "agent":
+        # DeepAgents 工具模式：带 FilesystemBackend + 沙箱 + 子智能体委派 + HITL
+        stream = conversation_agent_runtime.stream(db, project_id, item, agent, payload.content)
+    else:
+        stream = conversation_service.stream_message(
+            project_id, conversation_id, agent, payload.content,
+            remember=payload.remember, user_id=user.id, client_ip=client_ip,
+        )
     return StreamingResponse(
         stream,
         media_type="text/event-stream",
@@ -147,3 +159,46 @@ def regenerate_title(project_id: str, conversation_id: str, user: User = Depends
     db.commit()
     db.refresh(item)
     return ConversationResponse(**build_conversation_response(db, item))
+
+
+@router.get("/projects/{project_id}/conversations/{conversation_id}/interrupts", response_model=list[InterruptResponse])
+def list_interrupts(project_id: str, conversation_id: str, db: Session = Depends(get_db)) -> list[InterruptResponse]:
+    item = _get_conversation_or_404(db, project_id, conversation_id)
+    rows = db.scalars(
+        select(ConversationInterrupt)
+        .where(ConversationInterrupt.conversation_id == item.id, ConversationInterrupt.status == "pending")
+        .order_by(ConversationInterrupt.created_at)
+    ).all()
+    return [
+        InterruptResponse(id=row.id, conversation_id=row.conversation_id, tool_name=row.tool_name, payload=row.payload_json or {}, status=row.status, created_at=row.created_at)
+        for row in rows
+    ]
+
+
+@router.post("/projects/{project_id}/conversations/{conversation_id}/interrupts/{interrupt_id}/decide", response_model=AgentDecisionResponse)
+def decide_interrupt(project_id: str, conversation_id: str, interrupt_id: str, payload: InterruptDecideRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> AgentDecisionResponse:
+    """人工审批 DeepAgents 中断：approve / edit / reject，随后 Agent 从检查点恢复继续执行。"""
+    item = _get_conversation_or_404(db, project_id, conversation_id)
+    interrupt = db.scalar(
+        select(ConversationInterrupt).where(
+            ConversationInterrupt.id == interrupt_id,
+            ConversationInterrupt.conversation_id == item.id,
+            ConversationInterrupt.status == "pending",
+        )
+    )
+    if not interrupt:
+        raise not_found("待审批请求", interrupt_id)
+    agent = _get_agent_or_404(db, item.agent_key)
+    result = conversation_agent_runtime.decide(
+        db, item, agent, interrupt, payload.decision, payload.reason, payload.edited_action,
+    )
+    from app.core.auth import audit
+    audit(db, user, "conversation.approval", project_id=project_id, resource_type="conversation", resource_id=item.id, metadata={"decision": payload.decision, "tool": interrupt.tool_name})
+    db.commit()
+    return AgentDecisionResponse(**result)
+
+
+@router.get("/projects/{project_id}/conversations/{conversation_id}/workspace")
+def conversation_workspace(project_id: str, conversation_id: str, db: Session = Depends(get_db)) -> dict:
+    _get_conversation_or_404(db, project_id, conversation_id)
+    return {"files": conversation_agent_runtime.workspace_files(project_id)}

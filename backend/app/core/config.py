@@ -89,6 +89,7 @@ class Settings:
     langgraph_checkpoint_db: Path
     generated_database_url: str
     conversation_context_tokens: int
+    embedding_model: str
     conversation_history_min_messages: int
     generated_database_backup_dir: Path
 
@@ -186,6 +187,7 @@ def get_settings() -> Settings:
         langgraph_checkpoint_db=(base_dir / os.getenv("LANGGRAPH_CHECKPOINT_DB", "data/langgraph_checkpoints.sqlite")).resolve(),
         generated_database_url=os.getenv("GENERATED_DATABASE_URL", ""),
         conversation_context_tokens=int(os.getenv("CONVERSATION_CONTEXT_TOKENS", "6000")),
+        embedding_model=os.getenv("EMBEDDING_MODEL", "") or os.getenv("LLM_MODEL", ""),
         conversation_history_min_messages=int(os.getenv("CONVERSATION_HISTORY_MIN_MESSAGES", "12")),
         generated_database_backup_dir=(base_dir / os.getenv("GENERATED_DATABASE_BACKUP_DIR", "data/generated-db-backups")).resolve(),
     )

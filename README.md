@@ -151,8 +151,12 @@
 - 智能体对话：每个智能体均有独立会话（按项目），支持长期记忆、上下文管理与多轮对话
 - 对话上下文：Agent 人设 + 按相关性召回的持久记忆 + 装配的 Skills 指令 + 历史消息（Token 预算自动裁剪旧消息）
 - 对话长期记忆：每轮对话自动提取值得记住的事实写入 Episodic 记忆（可开关），下次对话自动召回
+- 记忆语义召回：配置 embedding 模型后按 关键词×0.5 + 余弦相似度×0.5 混合重排，不可用时自动降级关键词排序
 - SSE 流式回复：逐 Token 打字机输出（fetch + ReadableStream 解析），提供方不支持 stream 时自动降级
 - AI 会话标题：首条回复后自动生成标题，可随时点击魔法按钮基于最近消息重新生成
+- 对话工具模式（DeepAgents）：每个对话可切换为真实智能体——项目专属文件工作区（FilesystemBackend）、
+  Python 沙箱工具、TodoList、平台子智能体委派（task tool）、Skills 与长期记忆注入、生产部署 HITL
+  中断（流式事件触发审批卡片，批准/编辑/驳回后从检查点恢复继续执行）
 - Git Init、Branch、Commit 和可配置 Push
 - MinIO 上传与本地文件降级
 - 站内通知、SMTP 和 Webhook
@@ -458,6 +462,7 @@ QUEUE_FALLBACK_THREADS=true
 ```env
 CONVERSATION_CONTEXT_TOKENS=6000
 CONVERSATION_HISTORY_MIN_MESSAGES=12
+EMBEDDING_MODEL=           # 留空则沿用 LLM_MODEL；不支持 embedding 的网关自动降级关键词召回
 ```
 
 每轮对话召回长期记忆并裁剪超出 Token 预算的早期消息；未配置 `LLM_API_KEY` 时对话返回明确的 `503 LLM_NOT_CONFIGURED`。
@@ -716,6 +721,9 @@ GET/PATCH/DELETE       /api/v1/projects/{id}/conversations/{conversationId}
 POST                   /api/v1/projects/{id}/conversations/{conversationId}/messages
 POST                   /api/v1/projects/{id}/conversations/{conversationId}/messages/stream   # SSE
 POST                   /api/v1/projects/{id}/conversations/{conversationId}/title
+GET                    /api/v1/projects/{id}/conversations/{conversationId}/interrupts
+POST                   /api/v1/projects/{id}/conversations/{conversationId}/interrupts/{interruptId}/decide
+GET                    /api/v1/projects/{id}/conversations/{conversationId}/workspace
 GET                    /api/v1/settings/status
 GET                    /api/v1/queue/status
 GET                    /api/v1/queue/jobs
@@ -745,8 +753,10 @@ cd backend
 
 当前结果：
 
-- 后端集成测试：`29 passed`
-- 前端单元测试：`60 passed`（API 客户端、路由守卫、OIDC 回调、管理页、流程图、对话面板与流式回复）
+- 后端集成测试：`31 passed`
+- 前端单元测试：`62 passed`（API 客户端、路由守卫、OIDC 回调、管理页、流程图、对话面板/工具模式/审批）
+- Playwright E2E：登录导航、项目工作区、流程编排 3 组用例（`scripts/e2e.sh`，需可下载浏览器与模型 Key 的网络环境）
+- 安全与验收脚手架：`scripts/security.sh`（Semgrep/Trivy/Syft）、`locustfile.py` 并发压测
 - TypeScript 检查：通过
 - Vite Production Build：通过
 - npm audit：`0 vulnerabilities`
@@ -809,7 +819,7 @@ Agent@2026
 - 企业微信专用 OAuth 与钉钉专用消息格式尚未单独封装
 - Docker 部署使用动态端口，尚未接入固定域名、HTTPS 和蓝绿流量代理
 - 本地进程沙箱不提供可靠网络/文件系统边界，生产必须使用 Docker Sandbox
-- DeepAgents 原生 Checkpointer 当前使用 SQLite；多节点生产可切换 PostgreSQL Checkpointer
+- LangGraph Checkpointer 自动选择：PostgreSQL 部署切换 PostgresSaver，连接失败回退 SQLite（无需额外配置）
 - 生成应用 PostgreSQL 回滚依赖部署机器安装 `pg_dump` 和 `pg_restore`
 - 平台 Docker 镜像与 `docker-compose.production.yml` 已在无 Docker 环境做静态校验，首次使用时请在具备 Docker daemon 的机器上完成镜像构建验证
 - 仍需补充 Playwright E2E、SAST、镜像扫描、SBOM 和大规模并发验收

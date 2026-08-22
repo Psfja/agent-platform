@@ -720,7 +720,8 @@ class ConversationCreate(APIModel):
 
 
 class ConversationUpdate(APIModel):
-    title: str = Field(min_length=1, max_length=200)
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    mode: Literal["chat", "agent"] | None = None
 
 
 class ConversationMessageResponse(APIModel):
@@ -735,6 +736,7 @@ class ConversationResponse(APIModel):
     id: str
     project_id: str
     agent_key: str
+    mode: str
     title: str
     created_at: datetime
     updated_at: datetime
@@ -757,3 +759,23 @@ class ChatTurnResponse(APIModel):
     assistant_message: ConversationMessageResponse
     memories_used: list[MemoryResponse]
     context: dict[str, Any]
+
+
+class InterruptDecideRequest(APIModel):
+    decision: Literal["approve", "edit", "reject"]
+    reason: str = Field(default="", max_length=2000)
+    edited_action: dict[str, Any] = Field(default_factory=dict)
+
+
+class InterruptResponse(APIModel):
+    id: str
+    conversation_id: str
+    tool_name: str
+    payload: dict[str, Any]
+    status: str
+    created_at: datetime
+
+
+class AgentDecisionResponse(APIModel):
+    conversation: ConversationResponse
+    assistant_message: ConversationMessageResponse

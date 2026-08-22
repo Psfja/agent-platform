@@ -110,7 +110,7 @@ export interface SettingsStatus {
   deployment: { publicHost: string; generatedDatabaseConfigured: boolean }
   generatedAt: string
 }
-export interface ConversationRecord { id: string; projectId: string; agentKey: string; title: string; createdAt: string; updatedAt: string; lastMessageAt: string | null; messageCount: number }
+export interface ConversationRecord { id: string; projectId: string; agentKey: string; mode: string; title: string; createdAt: string; updatedAt: string; lastMessageAt: string | null; messageCount: number }
 export interface ConversationMessageRecord { id: string; role: 'user' | 'assistant'; content: string; metadata: Record<string, any>; createdAt: string }
 export interface ConversationDetailRecord extends ConversationRecord { messages: ConversationMessageRecord[] }
 export interface ChatTurnRecord {
@@ -122,11 +122,13 @@ export interface ChatTurnRecord {
 }
 export interface StreamDoneRecord {
   conversation: ConversationRecord
-  assistantMessage: ConversationMessageRecord
+  assistantMessage?: ConversationMessageRecord | null
   memoriesUsed: MemoryRecord[]
   userMessageId?: string
   title?: string | null
+  interrupt?: { toolName: string; payload: Record<string, any> } | null
 }
+export interface ConversationInterruptRecord { id: string; conversationId: string; toolName: string; payload: Record<string, any>; status: string; createdAt: string }
 
 export interface RequirementRecord { id:string;projectId:string;version:number;title:string;contentMarkdown:string;structuredData:Record<string,any>;status:string;changeSummary:string;createdBy:string|null;createdAt:string }
 export interface DocumentRecord { id:string;projectId:string;documentType:string;version:number;title:string;contentMarkdown:string;sourceBuildId:string|null;metadata:Record<string,any>;createdBy:string|null;createdAt:string;updatedAt:string }
@@ -320,9 +322,10 @@ export const api = {
     content: string,
     remember: boolean,
     handlers: {
-      onMeta?: (context: ChatTurnRecord['context']) => void
+      onMeta?: (context: Record<string, number | string>) => void
       onDelta?: (chunk: string) => void
       onTitle?: (title: string) => void
+      onInterrupt?: (interrupt: { interruptId?: string; toolName: string; payload: Record<string, any> }) => void
     } = {},
   ): Promise<StreamDoneRecord> {
     const doFetch = (token: string) => fetch(`${API_BASE}/projects/${projectId}/conversations/${conversationId}/messages/stream`, {
@@ -364,6 +367,7 @@ export const api = {
       if (parsed.type === 'meta') handlers.onMeta?.(parsed.context)
       else if (parsed.type === 'delta') handlers.onDelta?.(parsed.content || '')
       else if (parsed.type === 'title') handlers.onTitle?.(parsed.title)
+      else if (parsed.type === 'interrupt') handlers.onInterrupt?.({ interruptId: parsed.interruptId, toolName: parsed.toolName, payload: parsed.payload })
       else if (parsed.type === 'done') done = parsed as unknown as StreamDoneRecord
       else if (parsed.type === 'error') throw new ApiError(parsed.status || 502, parsed.code || 'STREAM_ERROR', parsed.message || '流式对话失败')
     }
@@ -388,6 +392,10 @@ export const api = {
     return done
   },
   regenerateConversationTitle(projectId: string, conversationId: string): Promise<ConversationRecord> { return request(`/projects/${projectId}/conversations/${conversationId}/title`, { method: 'POST' }) },
+  setConversationMode(projectId: string, conversationId: string, mode: 'chat' | 'agent'): Promise<ConversationRecord> { return request(`/projects/${projectId}/conversations/${conversationId}`, { method: 'PATCH', body: JSON.stringify({ mode }) }) },
+  conversationInterrupts(projectId: string, conversationId: string): Promise<ConversationInterruptRecord[]> { return request(`/projects/${projectId}/conversations/${conversationId}/interrupts`) },
+  decideConversationInterrupt(projectId: string, conversationId: string, interruptId: string, decision: 'approve' | 'edit' | 'reject', reason = '', editedAction: Record<string, any> = {}): Promise<{ conversation: ConversationRecord; assistantMessage: ConversationMessageRecord }> { return request(`/projects/${projectId}/conversations/${conversationId}/interrupts/${interruptId}/decide`, { method: 'POST', body: JSON.stringify({ decision, reason, editedAction }) }) },
+  conversationWorkspace(projectId: string, conversationId: string): Promise<{ files: { path: string; size: number }[] }> { return request(`/projects/${projectId}/conversations/${conversationId}/workspace`) },
   connectEvents(projectId: string, onEvent: (event: MessageEvent) => void): EventSource {
     const source = new EventSource(`${API_BASE}/projects/${projectId}/events?access_token=${encodeURIComponent(authTokens.access())}`)
     for (const event of ['task.status_changed', 'task.created', 'iteration.started', 'project.updated']) source.addEventListener(event, onEvent)

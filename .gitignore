@@ -31,3 +31,9 @@ backend/data/
 # Logs
 *.log
 npm-debug.log*
+
+# E2E 与压测产物
+e2e-results/
+playwright-report/
+test-results/
+locust_report*.html

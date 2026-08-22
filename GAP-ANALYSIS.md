@@ -268,3 +268,33 @@
   SSE 裸 dict 需手动 camelCase（不走 Pydantic 别名序列化）——均已修复并有测试覆盖。
 - 验证：后端 27 → 29 passed；前端 58 → 60 passed；构建通过；
   端到端冒烟（Vite 代理 → meta 事件 + error 事件、content-type、标题 409）通过。
+
+### 第七轮修复（2026-08-22）：工具型对话（DeepAgents）+ P2 免 Key 可建项
+
+**P1-① CI**：再次尝试推送 `.github/workflows/ci.yml` 仍被 GitHub App `workflows` 权限拒绝，
+文件保留工作区（`?? .github/`），需用户账号推送（命令见 PR #1 描述）。
+
+**P1-② 对话工具模式（DeepAgents，能动手干活）**：
+- 对话新增 `mode`（chat | agent，Alembic 0005）与 `conversation_interrupts` 表
+- 工具模式运行时 `conversation_agent.py`：项目专属工作区 + FilesystemBackend、`run_python_in_sandbox`
+  沙箱工具、TodoList、平台子智能体委派（task tool）、Skills + 长期记忆（AGENTS.md）、
+  `request_production_deployment` HITL 中断（SqliteSaver 检查点，PG 部署自动切 PostgresSaver）
+- API：PATCH 切换模式；流式 SSE 事件新增 `interrupt`；`GET .../interrupts`、
+  `POST .../interrupts/{id}/decide`（approve/edit/reject → `Command(resume=...)` 恢复）、
+  `GET .../workspace`（工作区文件清单）
+- UI：聊天/工具模式开关、审批卡片（批准/编辑 JSON/驳回）、工作区文件抽屉
+- 测试：stub `create_deep_agent` 全链路（流式 delta → 中断事件 → 审批恢复 → 工作区 → 无 Key 503），
+  后端 29 → 31 passed；前端 58 → 62 passed
+
+**P2 免 Key 可建项**：
+- **PG Checkpointer 自动切换**：`build_langgraph_checkpointer()`——PostgreSQL 部署用 PostgresSaver，
+  连接失败回退 SQLite（测试覆盖两种路径）
+- **语义向量记忆召回**：`embed_query()`（/embeddings，失败静默降级）+ 记忆
+  关键词×0.5+余弦×0.5 混合重排（进程内缓存；不可用时保持关键词排序，测试覆盖）
+- **Playwright E2E 脚手架**：playwright.config.ts + 3 组用例（登录导航/项目工作区/流程编排）、
+  `scripts/e2e.sh`、`npm run test:e2e`（沙箱无法下载 Chromium，需在可访问网络环境运行）
+- **安全与验收脚本**：`scripts/security.sh`（npm audit + Semgrep SAST + Trivy 镜像扫描 + Syft SBOM）、
+  `locustfile.py` 并发压测（5 类端点任务）
+
+**待环境项（需要 Key/浏览器下载/Docker daemon 才能激活）**：真实模型首跑、E2E 实跑、
+镜像扫描实跑、HTTPS/域名/蓝绿（nginx TLS 模板待补）、企业连接器与定时调度（P3）。

@@ -36,6 +36,7 @@ def conversation_response(db: Session, item: Conversation) -> dict[str, Any]:
         "id": item.id,
         "project_id": item.project_id,
         "agent_key": item.agent_key,
+        "mode": getattr(item, "mode", "chat"),
         "title": item.title,
         "created_at": item.created_at,
         "updated_at": item.updated_at,

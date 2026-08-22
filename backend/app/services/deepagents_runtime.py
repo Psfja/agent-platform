@@ -32,6 +32,32 @@ def request_production_deployment(version: str, summary: str) -> str:
     return f"Production deployment approved: {version}; {summary}"
 
 
+def build_langgraph_checkpointer(settings: Any):
+    """PostgreSQL 部署自动切换 PostgresSaver；不可用时回退 SQLite 并给出提示。"""
+    import logging
+
+    logger = logging.getLogger("agent-platform")
+    if settings.database_url.startswith("postgresql"):
+        try:
+            import psycopg
+            from langgraph.checkpoint.postgres import PostgresSaver
+
+            dsn = settings.database_url.replace("postgresql+psycopg", "postgresql")
+            connection = psycopg.connect(dsn, autocommit=True)
+            saver = PostgresSaver(connection)
+            saver.setup()
+            logger.info("LangGraph checkpointer: PostgreSQL")
+            return saver
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("PostgreSQL checkpointer 不可用（%s），回退 SQLite", exc)
+    settings.langgraph_checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(settings.langgraph_checkpoint_db, check_same_thread=False)
+    saver = SqliteSaver(connection)
+    saver.setup()
+    logger.info("LangGraph checkpointer: SQLite（%s）", settings.langgraph_checkpoint_db)
+    return saver
+
+
 @dataclass(slots=True)
 class NativeAgentOutcome:
     status: str
@@ -41,11 +67,7 @@ class NativeAgentOutcome:
 
 class DeepAgentsRuntime:
     def __init__(self) -> None:
-        settings = get_settings()
-        settings.langgraph_checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(settings.langgraph_checkpoint_db, check_same_thread=False)
-        self.checkpointer = SqliteSaver(self.connection)
-        self.checkpointer.setup()
+        self.checkpointer = build_langgraph_checkpointer(get_settings())
         self.lock = threading.RLock()
 
     def invoke(self, db: Session, project_id: str, build_id: str, workspace: Path, requirement: str, resume_decision: dict | None = None) -> NativeAgentOutcome:

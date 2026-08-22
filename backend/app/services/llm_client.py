@@ -175,6 +175,33 @@ class OpenAICompatibleClient:
             return response
 
 
+    def embed_query(self, text: str) -> list[float] | None:
+        """调用 OpenAI 兼容 /embeddings 接口；任何失败返回 None（调用方降级关键词召回）。"""
+        settings = get_settings()
+        if not self.configured or not settings.embedding_model:
+            return None
+        try:
+            response = self._request({
+                "model": settings.embedding_model,
+                "input": text[:8000],
+            }, path="/embeddings")
+            body = response.json()
+            vector = body["data"][0]["embedding"]
+            return [float(value) for value in vector]
+        except Exception:  # noqa: BLE001 —— 语义召回是增强能力，失败必须静默降级
+            return None
+
+    def _request(self, payload: dict[str, Any], *, path: str = "/chat/completions") -> httpx.Response:
+        with httpx.Client(timeout=httpx.Timeout(self.timeout, connect=20)) as client:
+            response = client.post(
+                f"{self.base_url}{path}",
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+            response.raise_for_status()
+            return response
+
+
 def estimate_tokens(text: str) -> int:
     """粗略估算文本 Token 数：中日韩字符按 1，其余按 4 字符 1 Token。"""
     cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
