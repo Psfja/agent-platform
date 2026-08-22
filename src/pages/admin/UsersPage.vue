@@ -50,6 +50,21 @@ onMounted(load)
     <section class="panel user-table-panel">
       <header class="table-toolbar"><div class="inline-search admin-search"><Search :size="15"/><input v-model="search" placeholder="搜索姓名、邮箱或部门"/></div><div><button class="filter-button" @click="load">{{loading?'加载中…':'刷新'}}</button></div></header>
       <div v-if="errorMessage" class="admin-empty"><p>{{errorMessage}}</p><button class="button secondary" @click="load">重试</button></div>
+      <table v-else-if="loading" class="data-table user-table">
+        <thead><tr><th>用户</th><th>部门</th><th>平台角色</th><th>账号来源</th><th>参与项目</th><th>最近登录</th><th>状态</th><th></th></tr></thead>
+        <tbody>
+          <tr v-for="row in 6" :key="row">
+            <td><div class="member-cell"><span class="skeleton skeleton-avatar"></span><div style="flex:1"><div class="skeleton skeleton-cell" style="width:72px"></div><div class="skeleton skeleton-cell" style="width:128px"></div></div></div></td>
+            <td><div class="skeleton skeleton-cell" style="width:64px"></div></td>
+            <td><span class="skeleton skeleton-chip"></span></td>
+            <td><span class="skeleton skeleton-chip" style="width:48px"></span></td>
+            <td><div class="skeleton skeleton-cell" style="width:32px"></div></td>
+            <td><div class="skeleton skeleton-cell" style="width:56px"></div></td>
+            <td><span class="skeleton skeleton-chip" style="width:40px"></span></td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
       <table v-else class="data-table user-table">
         <thead><tr><th>用户</th><th>部门</th><th>平台角色</th><th>账号来源</th><th>参与项目</th><th>最近登录</th><th>状态</th><th></th></tr></thead>
         <tbody>

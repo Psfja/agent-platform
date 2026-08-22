@@ -298,3 +298,20 @@
 
 **待环境项（需要 Key/浏览器下载/Docker daemon 才能激活）**：真实模型首跑、E2E 实跑、
 镜像扫描实跑、HTTPS/域名/蓝绿（nginx TLS 模板待补）、企业连接器与定时调度（P3）。
+
+### 第八轮修复（2026-08-22）：taste-skill 集成与前端设计优化
+
+- **集成**：克隆并评估 github.com/Leonxlnx/taste-skill（主 skill 声明不适用于 dashboard/数据表格类
+  产品 UI），选取其中的 redesign 技能适配为平台 Skill `backend/skills/ui-redesign/`
+  （skill.json + SKILL.md 中文审计清单 + main.py 可执行审计器，18 项自动检查，MIT 署名）。
+- **审计执行**：用该 Skill 对平台全部 CSS 跑审计——初测 11/18 通过。
+- **按 Fix Priority 修复 7 项缺失**：
+  1. typography：全局 `font-variant-numeric: tabular-nums`（数据密集界面）；h1-h3 `text-wrap: balance`
+  2. interaction：统一 `:active` 按压反馈（scale .98）+ 动效令牌；`prefers-reduced-motion` 降级
+  3. layout：全部 100vh → 100dvh（登录页/代码工作区/任务图/对比视图/弹窗 max-height）
+  4. components：z-index 令牌体系（--z-topbar/sidebar/menu/modal）
+  5. states：骨架屏 shimmer 类 + UsersPage/AgentTypesPage 加载骨架行
+  6. polish：`::selection` 品牌色、阴影色相令牌（--shadow-tint）、背景极 subtle 径向层次
+  7. 战略遗漏：品牌 SVG favicon（内联 data URI）、OG meta 标签；死链清零
+     （帮助与文档/切换工作区/忘记密码 改为真实提示行为）
+- **复测**：ui-redesign 审计 18/18 通过；后端 31 passed（skill 注册表 4 项）；前端 62 passed；构建通过。

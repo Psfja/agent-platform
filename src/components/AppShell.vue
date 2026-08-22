@@ -92,7 +92,7 @@ onMounted(async()=>{await app.initAuth();await app.loadProjects();await loadAdmi
           <div class="usage-track"><i :style="{width:`${Math.min(100,usage.system.cpuPercent)}%`}"></i></div>
           <small>{{fmtTokens(usage.agentBuilds.tokens)}} Tokens 已消耗 · {{usage.projects.active}} 活跃项目</small>
         </div>
-        <button class="nav-item"><CircleHelp :size="18"/><span>帮助与文档</span></button>
+        <button class="nav-item" @click="app.toast('帮助与文档','帮助中心与文档站正在建设中，可先参考 README。')"><CircleHelp :size="18"/><span>帮助与文档</span></button>
         <button class="collapse-btn" @click="app.sidebarCollapsed = !app.sidebarCollapsed">
           <ChevronLeft v-if="!app.sidebarCollapsed" :size="16"/><ChevronRight v-else :size="16"/>
           <span>收起导航</span>
@@ -110,7 +110,7 @@ onMounted(async()=>{await app.initAuth();await app.loadProjects();await loadAdmi
           <button class="icon-button bell-button" @click="app.notificationsOpen = !app.notificationsOpen"><Bell :size="19"/><i v-if="unreadCount"></i></button>
           <div class="profile-wrap">
             <button class="profile-button" @click="profileOpen = !profileOpen"><span class="avatar">{{userInitials}}</span><div><strong>{{app.currentUser?.displayName||'…'}}</strong><small>{{app.currentUser?.platformRole||''}}</small></div><ChevronDown :size="15"/></button>
-            <div v-if="profileOpen" class="profile-menu"><button @click="router.push('/admin/settings')">个人设置</button><button>切换工作区</button><button @click="app.logout()">退出登录</button></div>
+            <div v-if="profileOpen" class="profile-menu"><button @click="router.push('/admin/settings')">个人设置</button><button @click="app.toast('切换工作区','多工作区切换即将上线。')">切换工作区</button><button @click="app.logout()">退出登录</button></div>
           </div>
         </div>
         <div v-if="app.notificationsOpen" class="notification-panel">

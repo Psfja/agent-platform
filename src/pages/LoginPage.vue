@@ -27,7 +27,7 @@ onMounted(async()=>{try{sso.value=await api.ssoStatus()}catch{}})
         <form @submit.prevent="login">
           <div v-if="errorMessage" class="login-error">{{errorMessage}}</div>
           <label>企业账号</label><div class="login-input"><Fingerprint :size="17"/><input v-model="account" type="email" placeholder="name@company.com"/></div>
-          <div class="password-label"><label>密码</label><button type="button">忘记密码？</button></div><div class="login-input"><KeyRound :size="17"/><input v-model="password" :type="showPassword?'text':'password'" placeholder="输入密码"/><button type="button" @click="showPassword=!showPassword"><EyeOff v-if="showPassword" :size="16"/><Eye v-else :size="16"/></button></div>
+          <div class="password-label"><label>密码</label><button type="button" @click="app.toast('重置密码','请联系平台管理员在「用户与权限」中重置密码。')">忘记密码？</button></div><div class="login-input"><KeyRound :size="17"/><input v-model="password" :type="showPassword?'text':'password'" placeholder="输入密码"/><button type="button" @click="showPassword=!showPassword"><EyeOff v-if="showPassword" :size="16"/><Eye v-else :size="16"/></button></div>
           <label class="remember-row"><input type="checkbox" v-model="remember"/><i><CheckCircle2 :size="13"/></i><span>在此设备上保持登录</span></label>
           <button class="login-submit" type="submit" :disabled="loading"><LoaderCircle v-if="loading" :size="17" class="spin"/><span>{{loading?'正在验证身份…':'登录工作空间'}}</span><ArrowRight v-if="!loading" :size="17"/></button>
         </form>

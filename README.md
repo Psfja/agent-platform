@@ -59,7 +59,8 @@
 - Skill Manifest、输入 Schema 和 SHA-256 校验
 - Skill 热重载
 - Skill 代码只在沙箱执行，不导入 API 进程
-- 内置需求分析、代码度量、回归测试计划 Skills
+- 内置需求分析、代码度量、回归测试计划、前端设计审计与优化 Skills
+  （ui-redesign 基于 taste-skill 的 redesign 技能适配，MIT 协议署名）
 
 ### 真实代码生成与质量门禁
 
@@ -164,6 +165,8 @@
 - Prometheus `/metrics`
 - 项目、任务、Agent Build、Deployment、Queue、Token 指标
 - 管理后台（智能体/流程/用户/设置/资源）全部接入真实 API
+- 前端设计体系：按 ui-redesign 审计 18/18 通过——z-index 令牌、tabular-nums 数字排版、
+  按压反馈与减动效、骨架屏、品牌 favicon、OG meta、100dvh 布局、死链清零
 
 ### 平台自身容器化部署
 
@@ -755,6 +758,7 @@ cd backend
 
 - 后端集成测试：`31 passed`
 - 前端单元测试：`62 passed`（API 客户端、路由守卫、OIDC 回调、管理页、流程图、对话面板/工具模式/审批）
+- 前端设计审计：`ui-redesign` Skill 18/18 项通过
 - Playwright E2E：登录导航、项目工作区、流程编排 3 组用例（`scripts/e2e.sh`，需可下载浏览器与模型 Key 的网络环境）
 - 安全与验收脚手架：`scripts/security.sh`（Semgrep/Trivy/Syft）、`locustfile.py` 并发压测
 - TypeScript 检查：通过

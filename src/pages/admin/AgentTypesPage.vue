@@ -40,6 +40,20 @@ onMounted(load)
         <div><button class="filter-button" @click="load"><Bot :size="14"/>{{loading?'加载中…':'刷新'}}</button></div>
       </header>
       <div v-if="errorMessage" class="admin-empty"><p>{{errorMessage}}</p><button class="button secondary" @click="load">重试</button></div>
+      <table v-else-if="loading" class="data-table agent-type-table">
+        <thead><tr><th>智能体</th><th>职责说明</th><th>模型</th><th>工具 / Skills</th><th>配置版本</th><th>状态</th><th></th></tr></thead>
+        <tbody>
+          <tr v-for="row in 6" :key="row">
+            <td><div class="member-cell"><span class="skeleton skeleton-avatar"></span><div style="flex:1"><div class="skeleton skeleton-cell" style="width:80px"></div><div class="skeleton skeleton-cell" style="width:110px"></div></div></div></td>
+            <td><div class="skeleton skeleton-cell" style="width:180px"></div></td>
+            <td><span class="skeleton skeleton-chip"></span></td>
+            <td><span class="skeleton skeleton-chip"></span><span class="skeleton skeleton-chip" style="width:48px;margin-left:5px"></span></td>
+            <td><div class="skeleton skeleton-cell" style="width:40px"></div></td>
+            <td><span class="skeleton skeleton-chip" style="width:40px"></span></td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
       <table v-else class="data-table agent-type-table">
         <thead><tr><th>智能体</th><th>职责说明</th><th>模型</th><th>工具 / Skills</th><th>配置版本</th><th>状态</th><th></th></tr></thead>
         <tbody>

@@ -575,7 +575,7 @@ def test_skill_registry_loads_built_in_skills(client):
     response = client.get("/api/v1/skills")
     assert response.status_code == 200
     skills = response.json()
-    assert {item["name"] for item in skills} == {"requirement-analysis", "code-metrics", "regression-plan"}
+    assert {item["name"] for item in skills} == {"requirement-analysis", "code-metrics", "regression-plan", "ui-redesign"}
     assert all(item["executable"] for item in skills)
     assert all(len(item["checksum"]) == 64 for item in skills)
 
