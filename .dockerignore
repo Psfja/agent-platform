@@ -1,0 +1,15 @@
+# 前端镜像构建上下文排除项（构建上下文为仓库根目录）
+node_modules
+dist
+.git
+*.tsbuildinfo
+backend
+backend/.venv
+backend/data
+backend/.env
+backend/__pycache__
+backend/.pytest_cache
+**/__pycache__
+**/*.pyc
+.env
+*.log

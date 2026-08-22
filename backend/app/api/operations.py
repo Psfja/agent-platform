@@ -46,3 +46,50 @@ def integrations_status() -> dict:
     from app.core.config import get_settings
     settings = get_settings()
     return {"git": {"configured": bool(settings.git_remote_url), "remote": settings.git_remote_url}, "minio": {"configured": artifact_storage.configured, "endpoint": settings.minio_endpoint, "bucket": settings.minio_bucket}, "smtp": {"configured": bool(settings.smtp_host), "host": settings.smtp_host}, "webhook": {"configured": bool(settings.notification_webhook_url)}}
+
+
+@router.get("/settings/status", dependencies=[Depends(require_platform_admin)])
+def settings_status() -> dict:
+    """只读、脱敏的平台配置状态，供管理后台"系统设置"页面展示真实配置。"""
+    from app.core.config import get_settings
+    from app.services.sandbox import sandbox_manager
+
+    settings = get_settings()
+    queue = persistent_queue.status()
+    sandbox = sandbox_manager.status()
+    sandbox_camel = {
+        "configuredBackend": sandbox.get("configured_backend"),
+        "activeBackend": sandbox.get("active_backend"),
+        "available": sandbox.get("available"),
+        "isolation": sandbox.get("isolation"),
+        "dockerAvailable": sandbox.get("docker_available"),
+        "limits": sandbox.get("limits", {}),
+        "warnings": sandbox.get("warnings", []),
+    }
+    return {
+        "platform": {"name": settings.app_name, "environment": settings.app_env, "debug": settings.debug},
+        "database": {"engine": "sqlite" if settings.is_sqlite else "postgresql", "migrationsEnabled": settings.run_db_migrations},
+        "llm": {
+            "configured": bool(settings.llm_api_key),
+            "baseUrl": settings.llm_base_url,
+            "model": settings.llm_model,
+            "engine": settings.agent_engine,
+            "timeoutSeconds": settings.llm_timeout_seconds,
+            "maxRetries": settings.llm_max_retries,
+        },
+        "sandbox": sandbox_camel,
+        "queue": queue,
+        "sso": {
+            "oidc": {"configured": bool(settings.oidc_issuer and settings.oidc_client_id), "issuer": settings.oidc_issuer, "clientId": settings.oidc_client_id},
+            "ldap": {"configured": bool(settings.ldap_url and settings.ldap_base_dn), "url": settings.ldap_url, "baseDn": settings.ldap_base_dn},
+        },
+        "security": {"jwtAlgorithm": settings.jwt_algorithm, "accessTokenMinutes": settings.access_token_minutes, "refreshTokenDays": settings.refresh_token_days},
+        "storage": {"minio": {"configured": artifact_storage.configured, "endpoint": settings.minio_endpoint, "bucket": settings.minio_bucket, "secure": settings.minio_secure}},
+        "git": {"configured": bool(settings.git_remote_url), "remote": settings.git_remote_url, "defaultBranch": settings.git_default_branch},
+        "notifications": {
+            "smtp": {"configured": bool(settings.smtp_host), "host": settings.smtp_host, "port": settings.smtp_port, "username": settings.smtp_username},
+            "webhook": {"configured": bool(settings.notification_webhook_url)},
+        },
+        "deployment": {"publicHost": settings.deployment_public_host, "generatedDatabaseConfigured": bool(settings.generated_database_url)},
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }

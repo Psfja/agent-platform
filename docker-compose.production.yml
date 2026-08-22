@@ -1,0 +1,165 @@
+# 智构（Agent Studio）平台生产编排
+#
+# 服务：PostgreSQL + Redis + API + Worker + Nginx 前端（可选 MinIO）
+#
+# 快速开始：
+#   1. cp .env.docker.example .env        # 至少修改 JWT_SECRET
+#   2. docker compose -f docker-compose.production.yml up -d --build
+#   3. 访问前端 http://localhost:8080（默认），Swagger http://localhost:8000/docs
+#
+# 注意：
+#   - JWT_SECRET 必须修改为随机长密钥
+#   - api/worker 挂载 /var/run/docker.sock 用于"生成应用"的 Docker 沙箱与部署，
+#     意味着这两个容器可操作宿主机 Docker daemon，仅建议在受控主机部署；
+#     若不需要生成应用容器部署能力，可删除该挂载并将 SANDBOX_BACKEND 改为 local
+#   - 可选 MinIO：docker compose -f docker-compose.production.yml --profile storage up -d
+
+name: agent-platform
+
+x-api-env: &api-env
+  APP_ENV: production
+  APP_DEBUG: "false"
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-agent_platform}:${POSTGRES_PASSWORD:-agent_platform}@postgres:5432/${POSTGRES_DB:-agent_platform}
+  REDIS_URL: redis://redis:6379/0
+  QUEUE_NAME: agent-platform
+  QUEUE_FALLBACK_THREADS: "false"
+  RUN_DB_MIGRATIONS: "true"
+  SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+  JWT_SECRET: ${JWT_SECRET:-change-me-in-production-at-least-32-random-characters}
+  ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-30}
+  REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-7}
+  LLM_BASE_URL: ${LLM_BASE_URL:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_MODEL: ${LLM_MODEL:-}
+  AGENT_ENGINE: ${AGENT_ENGINE:-deepagents}
+  SANDBOX_BACKEND: ${SANDBOX_BACKEND:-docker}
+  SANDBOX_DOCKER_IMAGE: python:3.11-alpine
+  DEPLOYMENT_PUBLIC_HOST: ${DEPLOYMENT_PUBLIC_HOST:-localhost}
+  SKILL_DIRECTORIES: /app/skills
+  LANGGRAPH_CHECKPOINT_DB: /app/data/langgraph_checkpoints.sqlite
+  GIT_REMOTE_URL: ${GIT_REMOTE_URL:-}
+  GIT_DEFAULT_BRANCH: ${GIT_DEFAULT_BRANCH:-main}
+  MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
+  MINIO_BUCKET: ${MINIO_BUCKET:-agent-platform}
+  MINIO_SECURE: "false"
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  NOTIFICATION_WEBHOOK_URL: ${NOTIFICATION_WEBHOOK_URL:-}
+  OIDC_ISSUER: ${OIDC_ISSUER:-}
+  OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+  OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+  OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:8080/login/callback}
+  LDAP_URL: ${LDAP_URL:-}
+  LDAP_BASE_DN: ${LDAP_BASE_DN:-}
+  LDAP_BIND_DN: ${LDAP_BIND_DN:-}
+  LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:-}
+  GENERATED_DATABASE_URL: ${GENERATED_DATABASE_URL:-}
+  GENERATED_DATABASE_BACKUP_DIR: /app/data/generated-db-backups
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-agent_platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_platform}
+      POSTGRES_DB: ${POSTGRES_DB:-agent_platform}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent_platform} -d ${POSTGRES_DB:-agent_platform}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: docker/platform-api.Dockerfile
+    image: agent-platform-api:local
+    environment: *api-env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - platform-data:/app/data
+      # 供生成应用的 Docker 沙箱与容器部署（见文件头注意事项）
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: docker/platform-api.Dockerfile
+    image: agent-platform-api:local
+    command: ["python", "-m", "app.worker"]
+    environment: *api-env
+    volumes:
+      - platform-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    image: agent-platform-frontend:local
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # 可选对象存储：--profile storage
+  minio:
+    image: minio/minio:latest
+    profiles: ["storage"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  platform-data:
+  miniodata:

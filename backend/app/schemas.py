@@ -69,6 +69,40 @@ class SSOStatusResponse(APIModel):
     providers: list[str]
 
 
+class AdminUserCreate(APIModel):
+    email: str = Field(min_length=5, max_length=255)
+    display_name: str = Field(min_length=2, max_length=80)
+    department: str = Field(default="", max_length=120)
+    platform_role: Literal["super_admin", "platform_admin", "user"] = "user"
+    initial_password: str | None = Field(default=None, min_length=8, max_length=200)
+
+
+class AdminUserUpdate(APIModel):
+    display_name: str | None = Field(default=None, min_length=2, max_length=80)
+    department: str | None = Field(default=None, max_length=120)
+    platform_role: Literal["super_admin", "platform_admin", "user"] | None = None
+    is_active: bool | None = None
+    new_password: str | None = Field(default=None, min_length=8, max_length=200)
+
+
+class AdminUserResponse(APIModel):
+    id: str
+    email: str
+    display_name: str
+    department: str
+    platform_role: str
+    is_active: bool
+    auth_source: str
+    last_login_at: datetime | None
+    created_at: datetime
+    project_count: int
+
+
+class AdminUserCreatedResponse(APIModel):
+    user: AdminUserResponse
+    temp_password: str | None
+
+
 class LDAPLoginRequest(APIModel):
     username: str = Field(min_length=2, max_length=255)
     password: str = Field(min_length=1, max_length=200)
@@ -678,3 +712,48 @@ class DeploymentRuntimeStatusResponse(APIModel):
     ready: bool
     message: str
     running_deployments: int
+
+
+class ConversationCreate(APIModel):
+    agent_key: str = Field(min_length=2, max_length=80)
+    title: str = Field(default="", max_length=200)
+
+
+class ConversationUpdate(APIModel):
+    title: str = Field(min_length=1, max_length=200)
+
+
+class ConversationMessageResponse(APIModel):
+    id: str
+    role: str
+    content: str
+    metadata: dict[str, Any]
+    created_at: datetime
+
+
+class ConversationResponse(APIModel):
+    id: str
+    project_id: str
+    agent_key: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    last_message_at: datetime | None
+    message_count: int
+
+
+class ConversationDetailResponse(ConversationResponse):
+    messages: list[ConversationMessageResponse]
+
+
+class ConversationMessageCreate(APIModel):
+    content: str = Field(min_length=1, max_length=20000)
+    remember: bool = True
+
+
+class ChatTurnResponse(APIModel):
+    conversation: ConversationResponse
+    user_message: ConversationMessageResponse
+    assistant_message: ConversationMessageResponse
+    memories_used: list[MemoryResponse]
+    context: dict[str, Any]

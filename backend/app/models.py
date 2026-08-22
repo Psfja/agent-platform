@@ -292,6 +292,7 @@ class Project(Base):
     snapshots: Mapped[list[VersionSnapshot]] = relationship(back_populates="project", cascade="all, delete-orphan")
     artifacts: Mapped[list[Artifact]] = relationship(back_populates="project", cascade="all, delete-orphan")
     memories: Mapped[list[AgentMemory]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    conversations: Mapped[list[Conversation]] = relationship(back_populates="project", cascade="all, delete-orphan")
     sandbox_runs: Mapped[list[SandboxRun]] = relationship(back_populates="project", cascade="all, delete-orphan")
     agent_builds: Mapped[list[AgentBuild]] = relationship(back_populates="project", cascade="all, delete-orphan")
     application_deployments: Mapped[list[ApplicationDeployment]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -595,3 +596,38 @@ class Artifact(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     project: Mapped[Project] = relationship(back_populates="artifacts")
+
+
+class Conversation(Base):
+    """A chat conversation with an agent, scoped to a project, with context management and long-term memory."""
+
+    __tablename__ = "conversations"
+    __table_args__ = (Index("ix_conversation_project_updated", "project_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=uuid_str)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    agent_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), default="新对话")
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    project: Mapped[Project] = relationship(back_populates="conversations")
+    messages: Mapped[list[ConversationMessage]] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan", order_by="ConversationMessage.created_at"
+    )
+
+
+class ConversationMessage(Base):
+    __tablename__ = "conversation_messages"
+    __table_args__ = (Index("ix_conversation_message_created", "conversation_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=uuid_str)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False, index=True)  # user | assistant
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    conversation: Mapped[Conversation] = relationship(back_populates="messages")

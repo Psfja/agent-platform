@@ -88,6 +88,8 @@ class Settings:
     agent_engine: str
     langgraph_checkpoint_db: Path
     generated_database_url: str
+    conversation_context_tokens: int
+    conversation_history_min_messages: int
     generated_database_backup_dir: Path
 
     @property
@@ -183,5 +185,7 @@ def get_settings() -> Settings:
         agent_engine=os.getenv("AGENT_ENGINE", "deepagents").lower(),
         langgraph_checkpoint_db=(base_dir / os.getenv("LANGGRAPH_CHECKPOINT_DB", "data/langgraph_checkpoints.sqlite")).resolve(),
         generated_database_url=os.getenv("GENERATED_DATABASE_URL", ""),
+        conversation_context_tokens=int(os.getenv("CONVERSATION_CONTEXT_TOKENS", "6000")),
+        conversation_history_min_messages=int(os.getenv("CONVERSATION_HISTORY_MIN_MESSAGES", "12")),
         generated_database_backup_dir=(base_dir / os.getenv("GENERATED_DATABASE_BACKUP_DIR", "data/generated-db-backups")).resolve(),
     )

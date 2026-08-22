@@ -9,6 +9,7 @@ from app.database import Base, get_db
 from app.main import app
 from app.services.agent_builder import agent_build_runner
 from app.services.application_deployer import application_deployment_runner
+from app.services.conversation import conversation_service
 from app.services.seed import seed_demo_data
 from app.services.task_queue import persistent_queue
 
@@ -33,9 +34,11 @@ def client(tmp_path):
     original_session_factory = agent_build_runner.session_factory
     original_deployment_session_factory = application_deployment_runner.session_factory
     original_queue_session_factory = persistent_queue.session_factory
+    original_conversation_session_factory = conversation_service.session_factory
     agent_build_runner.session_factory = TestingSession
     application_deployment_runner.session_factory = TestingSession
     persistent_queue.session_factory = TestingSession
+    conversation_service.session_factory = TestingSession
     with TestClient(app) as test_client:
         login = test_client.post("/api/v1/auth/login", json={"email": "lin.jia@company.com", "password": "Agent@2026"})
         assert login.status_code == 200, login.text
@@ -44,5 +47,6 @@ def client(tmp_path):
     agent_build_runner.session_factory = original_session_factory
     application_deployment_runner.session_factory = original_deployment_session_factory
     persistent_queue.session_factory = original_queue_session_factory
+    conversation_service.session_factory = original_conversation_session_factory
     app.dependency_overrides.clear()
     engine.dispose()

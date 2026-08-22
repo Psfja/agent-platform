@@ -95,10 +95,11 @@
 - PBKDF2-SHA256 密码哈希
 - JWT Access Token
 - Refresh Token 持久化、轮换和撤销
-- 通用 OIDC Discovery、JWKS 和授权码回调
+- 通用 OIDC Discovery、JWKS 和授权码回调（前端 `/login/callback` 完整闭环）
 - LDAP 搜索和密码绑定
 - SSO 用户自动预配
 - 超级管理员、平台管理员、普通用户
+- 平台用户管理 API：列表、创建（自动生成初始密码）、角色变更、启停、密码重置和删除保护
 - Owner、Co-manager、Member、Viewer 项目 RBAC
 - 项目列表和项目 API 数据隔离
 - 登录、成员及关键操作审计
@@ -144,12 +145,34 @@
 - PipelineTemplate 与 PipelineNode CRUD
 - 节点依赖、顺序/并行模式和引用校验
 - 系统预置三套流程和需求关键词推荐
+- AI 流程生成：自然语言描述需求 → 模型网关生成流程草稿（引用真实 AgentType，自动清洗非法标识/无效引用/环依赖，无 Key 时明确报错不 Mock）
+- 流程图编排：SVG 流程图可视化；拖拽节点调整位置；从节点右侧把手拖到另一节点左侧把手建立依赖；点击连线删除；节点增删与自动布局；依赖面板勾选编辑；画布坐标随模板持久化
+- 平台用户管理：创建（一次性初始密码）、角色变更、启停、密码重置和删除保护
+- 智能体对话：每个智能体均有独立会话（按项目），支持长期记忆、上下文管理与多轮对话
+- 对话上下文：Agent 人设 + 按相关性召回的持久记忆 + 装配的 Skills 指令 + 历史消息（Token 预算自动裁剪旧消息）
+- 对话长期记忆：每轮对话自动提取值得记住的事实写入 Episodic 记忆（可开关），下次对话自动召回
+- SSE 流式回复：逐 Token 打字机输出（fetch + ReadableStream 解析），提供方不支持 stream 时自动降级
+- AI 会话标题：首条回复后自动生成标题，可随时点击魔法按钮基于最近消息重新生成
 - Git Init、Branch、Commit 和可配置 Push
 - MinIO 上传与本地文件降级
 - 站内通知、SMTP 和 Webhook
 - psutil 主机监控
 - Prometheus `/metrics`
 - 项目、任务、Agent Build、Deployment、Queue、Token 指标
+- 管理后台（智能体/流程/用户/设置/资源）全部接入真实 API
+
+### 平台自身容器化部署
+
+- FastAPI/Worker 单镜像（`backend/docker/platform-api.Dockerfile`，非 root 运行）
+- Vue + Nginx 前端镜像（`docker/frontend.Dockerfile`，SPA 回退、`/api` `/health` 反向代理、SSE 关闭缓冲、前端探活 `/healthz`）
+- `docker-compose.production.yml`：PostgreSQL + Redis + API + Worker + 前端一体化编排，含健康检查、重启策略、数据卷与可选 MinIO（`--profile storage`）
+- 根目录 `.env.docker.example` 提供全部部署环境变量模板
+
+### 持续集成
+
+- `.github/workflows/ci.yml`：push 与 PR 自动执行
+  - 后端：Python 3.11 + pytest + Alembic 单 head 校验
+  - 前端：npm ci + Vitest 单元测试 + vue-tsc + Vite 生产构建 + npm audit
 
 ---
 
@@ -226,6 +249,12 @@
 
 ```text
 agent-platform/
+├── .github/workflows/ci.yml        # CI：后端 pytest + Alembic，前端 Vitest + 构建 + audit
+├── docker/
+│   ├── frontend.Dockerfile         # 平台前端镜像（Vue 构建 + Nginx）
+│   └── nginx.conf                  # SPA 回退与 /api、/health 反向代理
+├── docker-compose.production.yml   # 平台本体生产编排（PostgreSQL/Redis/API/Worker/前端/MinIO）
+├── .env.docker.example             # Compose 环境变量模板
 ├── src/
 │   ├── api/client.ts
 │   ├── components/
@@ -233,21 +262,25 @@ agent-platform/
 │   ├── pages/
 │   │   ├── AgentBuildPage.vue
 │   │   ├── AgentRuntimePage.vue
+│   │   ├── LoginCallbackPage.vue   # 企业 OIDC 授权码回调
 │   │   └── admin/
 │   │       ├── AgentTypesPage.vue
 │   │       ├── AgentTypeEditPage.vue
 │   │       ├── SkillsPage.vue
 │   │       ├── PipelineTemplatesPage.vue
 │   │       ├── ResourcesPage.vue
-│   │       └── SettingsPage.vue
+│   │       ├── SettingsPage.vue
+│   │       └── UsersPage.vue
 │   ├── stores/
 │   ├── router.ts
 │   ├── styles.css
-│   └── additional.css
+│   ├── additional.css
+│   └── **/*.test.ts                # 前端 Vitest 单元测试（38 个）
 ├── backend/
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── auth.py
+│   │   │   ├── admin_users.py      # 平台用户管理
 │   │   │   ├── projects.py
 │   │   │   ├── content.py
 │   │   │   ├── tasks.py
@@ -275,13 +308,15 @@ agent-platform/
 │   │   └── worker.py
 │   ├── skills/
 │   ├── docker/
+│   │   ├── platform-api.Dockerfile # 平台 API/Worker 镜像
+│   │   └── agent-build.Dockerfile  # 生成应用构建镜像
 │   ├── tests/
 │   ├── alembic.ini
 │   ├── docker-compose.infrastructure.yml
 │   ├── requirements.txt
 │   └── .env.example
 ├── package.json
-├── vite.config.ts
+├── vite.config.ts                  # 含 Vitest 配置
 └── README.md
 ```
 
@@ -358,6 +393,22 @@ npm run dev -- --host 0.0.0.0
 - 健康检查：`http://localhost:8000/health`
 - Prometheus：`http://localhost:8000/metrics`
 
+### 7. （可选）Docker 一键部署平台本体
+
+```bash
+cp .env.docker.example .env    # 修改 JWT_SECRET 等
+docker compose -f docker-compose.production.yml up -d --build
+# 可选对象存储：
+docker compose -f docker-compose.production.yml --profile storage up -d
+```
+
+将构建平台 API/Worker 镜像与 Vue+Nginx 前端镜像，并启动 PostgreSQL、Redis。访问：
+
+- 前端（经 Nginx）：`http://localhost:8080`
+- Swagger：`http://localhost:8000/docs`
+
+详见 `docker-compose.production.yml` 头部说明（`docker.sock` 挂载与沙箱配置注意事项）。
+
 ---
 
 ## 环境配置
@@ -401,6 +452,15 @@ QUEUE_FALLBACK_THREADS=true
 ```
 
 生产环境建议设置 `QUEUE_FALLBACK_THREADS=false` 并独立运行 Worker。
+
+### 对话与上下文
+
+```env
+CONVERSATION_CONTEXT_TOKENS=6000
+CONVERSATION_HISTORY_MIN_MESSAGES=12
+```
+
+每轮对话召回长期记忆并裁剪超出 Token 预算的早期消息；未配置 `LLM_API_KEY` 时对话返回明确的 `503 LLM_NOT_CONFIGURED`。
 
 ### 沙箱与部署
 
@@ -648,6 +708,15 @@ GET  /api/v1/queue/migrations
 ```text
 GET/POST/PATCH/DELETE /api/v1/admin/agent-types
 GET/POST/PUT          /api/v1/admin/pipeline-templates
+POST                  /api/v1/admin/pipeline-templates/generate
+POST                  /api/v1/admin/pipeline-templates/recommend
+GET/POST/PATCH/DELETE /api/v1/admin/users
+GET/POST               /api/v1/projects/{id}/conversations
+GET/PATCH/DELETE       /api/v1/projects/{id}/conversations/{conversationId}
+POST                   /api/v1/projects/{id}/conversations/{conversationId}/messages
+POST                   /api/v1/projects/{id}/conversations/{conversationId}/messages/stream   # SSE
+POST                   /api/v1/projects/{id}/conversations/{conversationId}/title
+GET                    /api/v1/settings/status
 GET                    /api/v1/queue/status
 GET                    /api/v1/queue/jobs
 GET                    /api/v1/monitoring/summary
@@ -663,16 +732,21 @@ GET                    /metrics
 ## 测试与验证
 
 ```bash
-npm run build
+npm run test                        # 前端单元测试（Vitest + Vue Test Utils）
+npm run build                       # vue-tsc 类型检查 + Vite 生产构建
 npm audit --audit-level=moderate
 
 cd backend
-.venv/bin/pytest
+.venv/bin/pytest                    # 后端集成测试
+.venv/bin/python -m alembic heads   # 迁移单 head 校验
 ```
+
+推送分支或发起 PR 后，`.github/workflows/ci.yml` 会自动执行上述全部检查。
 
 当前结果：
 
-- 后端集成测试：`21 passed`
+- 后端集成测试：`29 passed`
+- 前端单元测试：`60 passed`（API 客户端、路由守卫、OIDC 回调、管理页、流程图、对话面板与流式回复）
 - TypeScript 检查：通过
 - Vite Production Build：通过
 - npm audit：`0 vulnerabilities`
@@ -680,7 +754,9 @@ cd backend
 
 集成测试覆盖：
 
+- 智能体对话：会话 CRUD、上下文组装（记忆+Skills+历史）、Token 预算裁剪、记忆自动提取与未配置模型 503
 - JWT、Refresh Token、RBAC 和项目隔离
+- 平台用户管理（创建/角色/启停/密码重置/删除保护）与系统设置状态脱敏
 - AgentType 与 PipelineTemplate
 - 记忆、Skills 和沙箱
 - 初始/增量代码生成
@@ -735,7 +811,7 @@ Agent@2026
 - 本地进程沙箱不提供可靠网络/文件系统边界，生产必须使用 Docker Sandbox
 - DeepAgents 原生 Checkpointer 当前使用 SQLite；多节点生产可切换 PostgreSQL Checkpointer
 - 生成应用 PostgreSQL 回滚依赖部署机器安装 `pg_dump` 和 `pg_restore`
-- 前端部分资源图表仍保留演示数据，后端真实监控 API 已可用
+- 平台 Docker 镜像与 `docker-compose.production.yml` 已在无 Docker 环境做静态校验，首次使用时请在具备 Docker daemon 的机器上完成镜像构建验证
 - 仍需补充 Playwright E2E、SAST、镜像扫描、SBOM 和大规模并发验收
 
 ---

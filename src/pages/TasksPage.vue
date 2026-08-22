@@ -2,7 +2,6 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Activity, ArrowRight, CheckCircle2, CircleDot, Clock3, Focus, Pause, Play, RefreshCcw, Workflow, ZoomIn, ZoomOut } from 'lucide-vue-next'
-import { tasks as fallbackTasks } from '../data/mock'
 import { api } from '../api/client'
 import { useAppStore } from '../stores/app'
 import type { Task } from '../types'
@@ -10,8 +9,8 @@ import PageTitle from '../components/PageTitle.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 
 const route=useRoute(); const router=useRouter(); const app=useAppStore(); const projectId=String(route.params.id)
-const taskItems=ref<Task[]>([...fallbackTasks])
-const selected=ref<Task>(taskItems.value.find(t=>t.id==='t-test') || taskItems.value[0]); const showOnlyIncremental=ref(false); const scale=ref(1); const paused=ref(false)
+const taskItems=ref<Task[]>([])
+const selected=ref<Task|null>(null); const showOnlyIncremental=ref(false); const scale=ref(1); const paused=ref(false)
 const visibleTasks=computed(()=>showOnlyIncremental.value?taskItems.value.filter(t=>t.incremental):taskItems.value)
 const stages=computed(()=>[
   {name:'规划',items:visibleTasks.value.filter(t=>['PM','RA','AR'].includes(t.agentShort))},
@@ -22,7 +21,7 @@ const stages=computed(()=>[
 const stats=computed(()=>({done:taskItems.value.filter(t=>t.status==='completed').length,running:taskItems.value.filter(t=>t.status==='in_progress').length,failed:taskItems.value.filter(t=>t.status==='failed').length,total:taskItems.value.length,progress:taskItems.value.length?Math.round(taskItems.value.reduce((sum,t)=>sum+t.progress,0)/taskItems.value.length):0}))
 let events: EventSource | null = null
 async function reload(showToast=false){
-  try{const latest=await api.tasks(projectId);taskItems.value=latest;selected.value=latest.find(t=>t.id===selected.value?.id)||latest.find(t=>t.status==='in_progress')||latest[0];if(showToast)app.toast('状态已同步','任务树已更新到最新状态。')}catch{if(showToast)app.toast('刷新失败','无法连接后端，继续显示本地演示数据。')}
+  try{const latest=await api.tasks(projectId);taskItems.value=latest;selected.value=latest.find(t=>t.id===selected.value?.id)||latest.find(t=>t.status==='in_progress')||latest[0]||null;if(showToast)app.toast('状态已同步','任务树已更新到最新状态。')}catch{if(showToast)app.toast('刷新失败','无法连接后端服务。')}
 }
 function pick(task:Task){selected.value=task}
 function zoom(delta:number){scale.value=Math.min(1.2,Math.max(.8,scale.value+delta))}
@@ -55,7 +54,7 @@ onUnmounted(()=>events?.close())
             <template v-for="(stage,index) in stages" :key="stage.name">
               <div class="graph-stage">
                 <span class="stage-label">{{stage.name}}</span>
-                <button v-for="task in stage.items" :key="task.id" class="task-node" :class="[{selected:selected.id===task.id,incremental:task.incremental},`node-${task.status}`]" @click="pick(task)">
+                <button v-for="task in stage.items" :key="task.id" class="task-node" :class="[{selected:selected?.id===task.id,incremental:task.incremental},`node-${task.status}`]" @click="pick(task)">
                   <span class="node-agent">{{task.agentShort}}<i v-if="task.status==='in_progress'"></i></span>
                   <div><strong>{{task.name}}</strong><small>{{task.agent}}</small><div class="node-meta"><StatusBadge :status="task.status"/><span>{{task.duration}}</span></div><div v-if="task.status==='in_progress'" class="node-progress"><i :style="{width:`${task.progress}%`}"></i></div></div>
                   <em v-if="task.incremental">增量</em>
@@ -69,13 +68,15 @@ onUnmounted(()=>events?.close())
       </section>
 
       <aside class="task-inspector">
-        <div class="inspector-head"><span class="large-agent">{{selected.agentShort}}<i v-if="selected.status==='in_progress'"></i></span><div><StatusBadge :status="selected.status"/><h3>{{selected.name}}</h3><p>{{selected.agent}}</p></div></div>
-        <div v-if="selected.status==='in_progress'" class="inspector-progress"><div><span>执行进度</span><b>{{selected.progress}}%</b></div><div><i :style="{width:`${selected.progress}%`}"></i></div><small><Clock3 :size="13"/>预计还需 14 分钟</small></div>
-        <p class="task-description">{{selected.description}}</p>
-        <dl class="task-facts"><div><dt>开始时间</dt><dd>{{selected.startedAt}}</dd></div><div><dt>已运行</dt><dd>{{selected.duration}}</dd></div><div><dt>Token 消耗</dt><dd>{{selected.tokens || '—'}}</dd></div><div><dt>涉及文件</dt><dd>{{selected.files ?? '—'}}</dd></div></dl>
-        <div class="current-action" v-if="selected.status==='in_progress'"><div><Activity :size="15"/><span>当前操作</span><i></i></div><p>执行 E2E：筛选假勤记录 → 发起导出 → 查询进度 → 下载文件</p><small>tool.shell · pytest</small></div>
-        <div class="inspector-section"><h4>依赖关系</h4><div class="dependency"><span class="dep done"><CheckCircle2 :size="14"/></span><div><b>增量代码审查</b><small>上游 · 已完成</small></div></div><div class="dependency"><span class="dep pending"><CircleDot :size="14"/></span><div><b>构建镜像并部署</b><small>下游 · 等待当前任务</small></div></div></div>
-        <button class="button primary full" @click="router.push(`/projects/${projectId}/tasks/${selected.id}`)">查看完整执行过程<ArrowRight :size="16"/></button>
+        <template v-if="selected">
+          <div class="inspector-head"><span class="large-agent">{{selected.agentShort}}<i v-if="selected.status==='in_progress'"></i></span><div><StatusBadge :status="selected.status"/><h3>{{selected.name}}</h3><p>{{selected.agent}}</p></div></div>
+          <div v-if="selected.status==='in_progress'" class="inspector-progress"><div><span>执行进度</span><b>{{selected.progress}}%</b></div><div><i :style="{width:`${selected.progress}%`}"></i></div><small><Clock3 :size="13"/>已运行 {{selected.duration}}</small></div>
+          <p class="task-description">{{selected.description}}</p>
+          <dl class="task-facts"><div><dt>开始时间</dt><dd>{{selected.startedAt}}</dd></div><div><dt>已运行</dt><dd>{{selected.duration}}</dd></div><div><dt>Token 消耗</dt><dd>{{selected.tokens || '—'}}</dd></div><div><dt>涉及文件</dt><dd>{{selected.files ?? '—'}}</dd></div></dl>
+          <div class="current-action" v-if="selected.currentAction"><div><Activity :size="15"/><span>当前操作</span><i></i></div><p>{{selected.currentAction}}</p></div>
+          <button class="button primary full" @click="router.push(`/projects/${projectId}/tasks/${selected.id}`)">查看完整执行过程<ArrowRight :size="16"/></button>
+        </template>
+        <div v-else class="deployment-empty-row">选择左侧任务查看详情{{taskItems.length?'':' · 暂无任务，创建项目后自动规划'}}</div>
       </aside>
     </div>
   </div>

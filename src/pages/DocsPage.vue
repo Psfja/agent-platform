@@ -1,16 +1,48 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { BookOpen, CheckCircle2, ChevronDown, ChevronRight, CloudDownload, Database, ExternalLink, FileJson, FileText, History, Link2, MoreHorizontal, Network, Pencil, Rocket, Search, Server, Sparkles } from 'lucide-vue-next'
+import { computed, onMounted, ref } from 'vue'
+import { Database, FileText, History, Network, Rocket, Search, Server, ShieldCheck } from 'lucide-vue-next'
+import { useRoute, useRouter } from 'vue-router'
+import { api, type DocumentRecord } from '../api/client'
 import { useAppStore } from '../stores/app'
 import PageTitle from '../components/PageTitle.vue'
 
-const app=useAppStore();const active=ref('architecture');const docs=[{id:'requirements',title:'需求说明书',icon:FileText,status:'已同步',updated:'今天 09:28'},{id:'architecture',title:'架构设计文档',icon:Network,status:'已同步',updated:'今天 10:02'},{id:'api',title:'API 接口文档',icon:Server,status:'已同步',updated:'今天 11:06'},{id:'database',title:'数据库设计文档',icon:Database,status:'已同步',updated:'4 天前'},{id:'deployment',title:'部署运维文档',icon:Rocket,status:'已同步',updated:'4 天前'}]
+const route=useRoute();const router=useRouter();const app=useAppStore()
+const projectId=String(route.params.id)
+const docs=ref<DocumentRecord[]>([]);const loading=ref(false);const errorMessage=ref('')
+const active=ref('');const query=ref('')
+const TYPE_META:Record<string,{label:string;icon:unknown}>={requirements:{label:'需求说明书',icon:FileText},architecture:{label:'架构设计文档',icon:Network},api:{label:'API 接口文档',icon:Server},database:{label:'数据库设计文档',icon:Database},testing:{label:'测试文档',icon:ShieldCheck},deployment:{label:'部署运维文档',icon:Rocket}}
+const grouped=computed(()=>{const map:Record<string,DocumentRecord[]>={};for(const doc of docs.value){(map[doc.documentType]||=[]).push(doc)}return map})
+const current=computed(()=>docs.value.find(d=>d.id===active.value)||null)
+const currentList=computed(()=>grouped.value[current.value?.documentType||'']||[])
+async function load(){loading.value=true;errorMessage.value='';try{docs.value=await api.documents(projectId);if(docs.value.length&&!current.value)active.value=docs.value[0].id}catch(error){errorMessage.value=error instanceof Error?error.message:'无法加载项目文档'}finally{loading.value=false}}
+onMounted(load)
 </script>
 
 <template>
-  <div class="content-width docs-page"><PageTitle title="项目文档" description="由智能体自动生成并随每次迭代持续更新。"><button class="button secondary" @click="app.toast('文档已导出','全部项目文档正在打包为 Markdown。')"><CloudDownload :size="16"/>导出全部</button><button class="button primary"><Pencil :size="16"/>编辑文档</button></PageTitle>
-    <div class="docs-layout"><aside class="docs-sidebar panel"><div class="docs-search"><Search :size="15"/><input placeholder="搜索文档内容"/></div><nav><button v-for="doc in docs" :key="doc.id" :class="{active:active===doc.id}" @click="active=doc.id"><span><component :is="doc.icon" :size="16"/></span><div><b>{{doc.title}}</b><small>{{doc.updated}}</small></div><CheckCircle2 :size="13"/></button></nav><div class="docs-version"><span><History :size="15"/></span><div><b>文档版本</b><small>v1.3.0 · 自动同步</small></div><ChevronRight :size="15"/></div></aside>
-      <main class="docs-reader panel"><header><div><span class="doc-large-icon"><Network :size="21"/></span><div><h2>架构设计文档</h2><p>ARCH-LEAVE-HUB · v1.3.0 · 由架构设计智能体维护</p></div></div><div><button><History :size="15"/>历史版本</button><button class="icon-button"><MoreHorizontal :size="18"/></button></div></header><div class="doc-toc"><b>本文目录</b><a href="#overview">1. 架构概述</a><a href="#stack">2. 技术选型</a><a href="#modules">3. 系统模块</a><a href="#deployment">4. 部署架构</a></div><article class="architecture-doc"><section id="overview"><span>01</span><h2>架构概述</h2><p>员工假勤管理平台采用前后端分离架构，前端使用 Vue 3 构建企业级单页应用，后端基于 FastAPI 提供异步 REST API。系统通过 PostgreSQL 持久化业务数据，Redis 承担缓存与异步任务状态，MinIO 保存报表文件。</p><div class="architecture-diagram"><div class="arch-layer"><b>用户接入层</b><span>员工门户</span><span>审批工作台</span><span>HR 管理后台</span></div><i></i><div class="arch-layer service"><b>应用服务层</b><span>假勤服务</span><span>审批服务</span><span>报表服务</span><span>通知服务</span></div><i></i><div class="arch-layer data"><b>数据资源层</b><span>PostgreSQL</span><span>Redis</span><span>MinIO</span></div></div></section><section id="stack"><span>02</span><h2>技术选型</h2><table><thead><tr><th>层次</th><th>技术</th><th>版本</th><th>选型说明</th></tr></thead><tbody><tr><td>前端框架</td><td><b>Vue 3 + TypeScript</b></td><td>3.5</td><td>成熟企业生态，类型安全</td></tr><tr><td>后端框架</td><td><b>FastAPI</b></td><td>0.116+</td><td>异步性能与自动 OpenAPI</td></tr><tr><td>关系数据库</td><td><b>PostgreSQL</b></td><td>15+</td><td>事务可靠，支持 JSONB</td></tr><tr><td>任务与缓存</td><td><b>Redis</b></td><td>7+</td><td>异步导出状态与通知队列</td></tr></tbody></table></section><section id="modules"><span>03</span><h2>系统模块</h2><div class="module-grid"><article><span>01</span><b>假勤申请</b><p>申请、撤回、额度校验与冲突检测</p></article><article><span>02</span><b>审批中心</b><p>可配置三级审批链与待办管理</p></article><article><span>03</span><b>团队日历</b><p>权限范围内的假勤可视化</p></article><article class="new"><span>04</span><b>报表导出</b><p>异步 Excel 生成与下载通知</p><em>v1.3 新增</em></article></div></section><div class="doc-callout"><Sparkles :size="16"/><p><b>智能体变更说明</b>v1.3.0 新增异步报表导出模块，不修改既有服务边界；通过事件通知降低模块耦合。</p></div></article></main>
-      <aside class="doc-meta panel"><header><strong>文档信息</strong></header><dl><div><dt>当前版本</dt><dd>v1.3.0</dd></div><div><dt>最后更新</dt><dd>今天 10:02</dd></div><div><dt>维护智能体</dt><dd>架构设计师</dd></div><div><dt>关联迭代</dt><dd class="indigo-text">i-130</dd></div></dl><section><h4>关联产物</h4><button><FileJson :size="16"/><div><b>openapi.json</b><small>128 KB</small></div><ExternalLink :size="14"/></button><button><Database :size="16"/><div><b>schema-v1.3.sql</b><small>42 KB</small></div><ExternalLink :size="14"/></button></section><section><h4>文档质量</h4><div class="doc-quality"><strong>96</strong><div><b>内容完整</b><small>无待补充章节</small></div></div></section></aside></div>
+  <div class="content-width docs-page">
+    <PageTitle title="项目文档" description="需求、架构、接口与部署文档，随迭代版本化持久保存（真实数据）。">
+      <button class="button secondary" @click="load">{{loading?'加载中…':'刷新'}}</button>
+      <button class="button primary" @click="router.push(`/projects/${projectId}/requirements`)">需求说明书</button>
+    </PageTitle>
+    <div v-if="errorMessage" class="admin-empty"><p>{{errorMessage}}</p><button class="button secondary" @click="load">重试</button></div>
+    <div v-else class="docs-layout">
+      <aside class="docs-sidebar panel">
+        <div class="docs-search"><Search :size="15"/><input v-model="query" placeholder="搜索文档标题"/></div>
+        <nav>
+          <template v-for="(items,type) in grouped" :key="type">
+            <button v-for="doc in items.filter(d=>d.title.toLowerCase().includes(query.toLowerCase()))" :key="doc.id" :class="{active:active===doc.id}" @click="active=doc.id">
+              <span><component :is="TYPE_META[type]?.icon||FileText" :size="16"/></span>
+              <div><b>{{doc.title}}</b><small>{{TYPE_META[type]?.label||type}} · v{{doc.version}} · {{new Date(doc.updatedAt).toLocaleDateString('zh-CN')}}</small></div>
+            </button>
+          </template>
+          <div v-if="!loading && !docs.length" class="deployment-empty-row" style="padding:18px">暂无文档 · 构建完成后智能体将自动生成项目文档</div>
+        </nav>
+      </aside>
+      <main v-if="current" class="docs-reader panel">
+        <header><div><span class="doc-large-icon"><component :is="TYPE_META[current.documentType]?.icon||FileText" :size="21"/></span><div><h2>{{current.title}}</h2><p>{{TYPE_META[current.documentType]?.label||current.documentType}} · v{{current.version}} · 更新于 {{new Date(current.updatedAt).toLocaleString('zh-CN',{hour12:false})}}</p></div></div><div><button><History :size="15"/>版本 {{current.version}} / {{currentList.length}}</button></div></header>
+        <pre class="doc-markdown">{{current.contentMarkdown}}</pre>
+      </main>
+      <aside v-else class="doc-meta panel"><div class="deployment-empty-row" style="padding:28px">从左侧选择文档查看内容</div></aside>
+    </div>
   </div>
 </template>

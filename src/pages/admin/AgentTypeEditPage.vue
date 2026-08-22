@@ -1,16 +1,96 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Box, BrainCircuit, Check, ChevronDown, Clock3, Cpu, FileCode2, History, Info, KeyRound, Play, Plus, Save, ShieldCheck, SlidersHorizontal, Sparkles, Terminal, Trash2, Wrench, X } from 'lucide-vue-next'
+import { ArrowLeft, Bot, Check, Puzzle, Save, ShieldCheck, Terminal, Wrench } from 'lucide-vue-next'
+import { api, ApiError, type AgentTypeRecord, type SkillRecord } from '../../api/client'
 import { useAppStore } from '../../stores/app'
+import PageTitle from '../../components/PageTitle.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
 
-const route=useRoute();const router=useRouter();const app=useAppStore();const isNew=computed(()=>route.params.id==='new');const tab=ref(String(route.query.tab||'basic'));const name=ref(isNew.value?'':'后端开发工程师');const key=ref(isNew.value?'':'backend-developer');const model=ref('deepseek-coder');const prompt=ref(`你是一名资深后端开发工程师，负责在既有项目架构和编码规范下完成后端开发任务。\n\n## 核心职责\n1. 在编码前阅读需求、架构文档与相关代码\n2. 遵循最小化改动原则，不修改无关模块\n3. API 优先保持向后兼容\n4. 为新增逻辑编写完整单元测试\n5. 记录关键技术决策与变更文件\n\n## 输出要求\n- 先说明实现计划，再执行代码修改\n- 每次工具调用后检查执行结果\n- 完成后返回变更摘要、风险与测试结果`);const tools=ref([{name:'文件读取',key:'read_file',on:true},{name:'文件写入',key:'write_file',on:true},{name:'Shell 执行',key:'shell',on:true},{name:'Git 操作',key:'git',on:true},{name:'HTTP 请求',key:'http',on:true},{name:'数据库访问',key:'database',on:true},{name:'Web 搜索',key:'web_search',on:false},{name:'Docker',key:'docker',on:true}]);const skills=ref(['FastAPI 服务开发','REST API 设计','SQLAlchemy 数据访问','Pytest 单元测试','数据库迁移','安全编码规范']);const cpu=ref(2);const memory=ref(4);const timeout=ref(60)
-function save(){app.toast('配置已保存',`${name.value||'新智能体'}配置已创建新版本。`);if(isNew.value)router.push('/admin/agent-types')}
+const route=useRoute();const router=useRouter();const app=useAppStore()
+const isNew=computed(()=>route.params.id==='new')
+const tab=ref('basic');const loading=ref(false);const saving=ref(false);const errorMessage=ref('');const loadError=ref('')
+const agent=ref<AgentTypeRecord|null>(null)
+const skillsCatalog=ref<SkillRecord[]>([])
+const name=ref('');const displayName=ref('');const description=ref('');const model=ref('deepseek-chat');const systemPrompt=ref('')
+const tools=ref<string[]>(['read_file','write_file','shell'])
+const skills=ref<string[]>([])
+const cpu=ref(2);const memory=ref(512);const timeout=ref(60);const isActive=ref(true)
+
+const TOOL_OPTIONS=[
+  {key:'read_file',label:'文件读取',description:'读取工作区文件'},
+  {key:'write_file',label:'文件写入',description:'创建与修改文件'},
+  {key:'shell',label:'Shell 执行',description:'在沙箱中执行命令'},
+  {key:'git',label:'Git 操作',description:'分支、提交与推送'},
+  {key:'http',label:'HTTP 请求',description:'调用外部接口'},
+  {key:'database',label:'数据库访问',description:'查询与迁移'},
+  {key:'web_search',label:'Web 搜索',description:'检索公开资料'},
+  {key:'docker',label:'Docker',description:'镜像构建与容器管理'},
+]
+const SKILL_LABELS:{[key:string]:string}={'requirement-analysis':'需求分析','code-metrics':'代码度量','regression-plan':'回归测试计划'}
+const MODEL_OPTIONS=['deepseek-chat','deepseek-coder','qwen-max','qwen-plus','glm-4-plus']
+
+function applyAgent(item:AgentTypeRecord){agent.value=item;name.value=item.name;displayName.value=item.displayName;description.value=item.description;model.value=item.model;systemPrompt.value=item.systemPrompt;tools.value=[...item.tools];skills.value=[...item.skills];cpu.value=Number(item.sandboxConfig?.cpu||2);memory.value=Number(item.sandboxConfig?.memoryMb||512);timeout.value=Number(item.sandboxConfig?.timeoutSeconds||60);isActive.value=item.isActive}
+function toggleItem(list:string[],key:string){const index=list.indexOf(key);if(index>=0)list.splice(index,1);else list.push(key)}
+async function load(){loading.value=true;loadError.value='';try{skillsCatalog.value=await api.skills();if(!isNew.value){const item=await api.agentType(String(route.params.id));applyAgent(item)}}catch(error){loadError.value=error instanceof Error?error.message:'无法加载配置'}finally{loading.value=false}}
+async function save(){
+  saving.value=true;errorMessage.value=''
+  const sandboxConfig={cpu:Number(cpu.value)||2,memoryMb:Number(memory.value)||512,timeoutSeconds:Number(timeout.value)||60}
+  const payload={displayName:displayName.value.trim(),description:description.value.trim(),systemPrompt:systemPrompt.value.trim(),model:model.value,tools:[...tools.value],skills:[...skills.value],sandboxConfig,isActive:isActive.value}
+  try{
+    if(isNew.value){await api.createAgentType({name:name.value.trim(),...payload});app.toast('创建成功',`${displayName.value} 已创建为配置版本 v1。`)}
+    else{const updated=await api.updateAgentType(String(route.params.id),payload);applyAgent(updated);app.toast('配置已保存',`${updated.displayName} 已更新为配置版本 v${updated.version}。`);router.push('/admin/agent-types')}
+    if(isNew.value)router.push('/admin/agent-types')
+  }catch(error){
+    if(error instanceof ApiError)errorMessage.value=`${error.message}${error.details?`（${JSON.stringify(error.details)}）`:''}`
+    else errorMessage.value=error instanceof Error?error.message:'保存失败'
+  }finally{saving.value=false}
+}
+onMounted(load)
 </script>
-<template><div class="agent-edit-page"><div class="content-width"><button class="back-link" @click="router.push('/admin/agent-types')"><ArrowLeft :size="16"/>返回智能体类型</button><section class="agent-edit-head"><div class="edit-agent-avatar">{{isNew?'AI':'BE'}}<i></i></div><div><span class="eyebrow">AGENT TYPE CONFIGURATION</span><h1>{{isNew?'创建智能体类型':'后端开发工程师'}}</h1><p>{{isNew?'定义新的专业角色、能力和运行环境。':'backend-developer · 配置版本 12'}}</p></div><div><button class="button secondary"><Play :size="16"/>测试运行</button><button class="button primary" @click="save"><Save :size="16"/>保存配置</button></div></section><div class="agent-edit-tabs"><button v-for="item in [['basic','基础信息'],['prompt','系统提示词'],['capabilities','工具与技能'],['sandbox','沙箱环境'],['stats','执行数据']]" :key="item[0]" :class="{active:tab===item[0]}" @click="tab=item[0]">{{item[1]}}</button></div>
-<div v-if="tab==='basic'" class="agent-form-layout"><main><section class="panel form-section"><header><span><Info :size="18"/></span><div><h3>基本信息</h3><p>用于主智能体识别和路由该专业角色</p></div></header><div class="form-grid"><label><span>显示名称 <em>*</em></span><input v-model="name" placeholder="例如：安全审查工程师"/></label><label><span>唯一标识 <em>*</em></span><input v-model="key" placeholder="security-reviewer"/><small>创建后不可修改</small></label><label class="full"><span>能力描述 <em>*</em></span><textarea placeholder="清晰描述该智能体擅长的任务，主智能体将根据此描述进行路由…">负责 FastAPI 服务、业务逻辑、REST API、数据库访问和自动化测试实现。擅长在既有架构下进行最小化增量修改。</textarea></label></div></section><section class="panel form-section"><header><span><BrainCircuit :size="18"/></span><div><h3>模型配置</h3><p>模型与智能体类型解耦，可随时切换</p></div></header><div class="model-selector"><label><span>推荐模型</span><button><div class="model-logo">DS</div><p><b>{{model}}</b><small>DeepSeek · 代码能力强</small></p><ChevronDown :size="16"/></button></label><label><span>Temperature</span><div class="range-control"><input type="range" min="0" max="10" value="2"/><b>0.2</b></div></label><label><span>最大输出 Token</span><input value="8192"/></label></div></section></main><aside><section class="panel config-summary"><h3>配置概览</h3><div><span>状态</span><StatusBadge status="running" label="已启用"/></div><div><span>关联流程</span><b>2 个</b></div><div><span>运行中项目</span><b>3 个</b></div><div><span>最近修改</span><b>2 天前</b></div></section><section class="panel config-notice"><ShieldCheck :size="17"/><p><b>运行中配置保护</b>保存后仅新任务使用新版配置，运行中的实例不会被中断。</p></section></aside></div>
-<div v-else-if="tab==='prompt'" class="prompt-config-layout"><section class="panel prompt-editor"><header><div><h3>System Prompt</h3><p>定义智能体的角色、行为约束和输出要求</p></div><div><span>{{prompt.length}} 字符</span><button><History :size="15"/>版本历史</button></div></header><div class="prompt-toolbar"><button>H1</button><button>H2</button><i></i><button>**B**</button><button>`Code`</button><i></i><button>插入变量</button></div><div class="prompt-code"><span class="prompt-lines">1<br/>2<br/>3<br/>4<br/>5<br/>6<br/>7<br/>8<br/>9<br/>10<br/>11<br/>12<br/>13<br/>14<br/>15</span><textarea v-model="prompt"></textarea></div></section><aside class="panel prompt-vars"><h3>可用变量</h3><p>运行时自动注入当前上下文</p><button v-for="v in ['{{ project_name }}','{{ requirement }}','{{ code_structure }}','{{ architecture_doc }}','{{ iteration_context }}','{{ user_instruction }}']" :key="v"><code>{{v}}</code><Plus :size="13"/></button></aside></div>
-<div v-else-if="tab==='capabilities'" class="capability-layout"><section class="panel tool-config"><header><div><h3>可用工具</h3><p>智能体执行任务时允许调用的函数</p></div><button class="button secondary"><Plus :size="15"/>添加工具</button></header><div class="tool-config-grid"><label v-for="tool in tools" :key="tool.key" :class="{enabled:tool.on}"><span><Terminal :size="17"/></span><div><b>{{tool.name}}</b><code>{{tool.key}}</code></div><button class="toggle-control" :class="{on:tool.on}" @click.prevent="tool.on=!tool.on"><i></i></button></label></div></section><section class="panel skill-config"><header><div><h3>Skills</h3><p>可复用的专业能力与知识模块</p></div><button class="button secondary"><Plus :size="15"/>关联 Skill</button></header><div><span v-for="skill in skills" :key="skill">{{skill}}<button @click="skills=skills.filter(s=>s!==skill)"><X :size="12"/></button></span></div></section></div>
-<div v-else-if="tab==='sandbox'" class="sandbox-layout"><section class="panel form-section"><header><span><Box :size="18"/></span><div><h3>沙箱运行环境</h3><p>每个智能体实例在独立容器中安全执行</p></div></header><div class="sandbox-image"><label><span>基础镜像</span><button><Box :size="17"/><div><b>agent-python-node:3.11-20</b><small>Python 3.11 · Node.js 20 · 常用数据库客户端</small></div><ChevronDown :size="15"/></button></label></div><div class="resource-sliders"><label><span><Cpu :size="15"/>CPU 上限</span><input type="range" min="1" max="8" v-model="cpu"/><b>{{cpu}} Core</b></label><label><span><SlidersHorizontal :size="15"/>内存上限</span><input type="range" min="1" max="16" v-model="memory"/><b>{{memory}} GB</b></label><label><span><Clock3 :size="15"/>任务超时</span><input type="range" min="10" max="180" v-model="timeout"/><b>{{timeout}} 分钟</b></label></div><div class="env-vars"><div><h4>环境变量</h4><button><Plus :size="14"/>添加变量</button></div><div><input value="APP_ENV"/><input value="sandbox"/><button><Trash2 :size="15"/></button></div><div><input value="PYTHONUNBUFFERED"/><input value="1"/><button><Trash2 :size="15"/></button></div></div></section></div>
-<div v-else class="agent-stats-view"><div class="admin-metrics"><article><div><small>累计执行</small><strong>326</strong><em class="green-text">本月 +84</em></div></article><article><div><small>任务成功率</small><strong>93.7%</strong><em class="green-text">+1.8%</em></div></article><article><div><small>平均耗时</small><strong>48m</strong><em>较上月 −6m</em></div></article><article><div><small>人工干预率</small><strong>12.3%</strong><em class="green-text">−2.1%</em></div></article></div><section class="panel stats-placeholder"><Sparkles :size="25"/><h3>智能体执行趋势</h3><div class="bar-chart"><i v-for="h in [42,58,51,72,65,80,76,90,84,96,88,93]" :key="h" :style="{height:`${h}%`}"></i></div><div class="chart-months"><span>9月</span><span>10月</span><span>11月</span><span>12月</span><span>1月</span><span>2月</span><span>3月</span><span>4月</span><span>5月</span><span>6月</span><span>7月</span><span>8月</span></div></section></div></div></div></template>
+
+<template>
+  <div class="content-width admin-page agent-edit-page">
+    <PageTitle :eyebrow="isNew?'CREATE AGENT TYPE':'AGENT TYPE CONFIGURATION'" :title="isNew?'创建智能体类型':(agent?.displayName||'智能体配置')" :description="isNew?'定义新的专业角色、能力与运行环境。':(agent?.name||'')+' · 配置版本 v'+(agent?.version||'—')">
+      <template v-if="agent"><StatusBadge :status="agent.isActive?'completed':'paused'" :label="agent.isActive?'已启用':'已停用'"/></template>
+      <button class="button primary" :disabled="saving||loading" @click="save"><Save :size="16"/>{{saving?'保存中…':'保存配置'}}</button>
+    </PageTitle>
+    <div v-if="loadError" class="admin-empty"><p>{{loadError}}</p><button class="button secondary" @click="load">重试</button></div>
+    <template v-else>
+      <section class="panel">
+        <div class="agent-edit-tabs">
+          <button v-for="item in [['basic','基础信息',Bot],['prompt','系统提示词',Terminal],['capabilities','工具与技能',Wrench],['sandbox','沙箱环境',ShieldCheck],['stats','配置信息',Puzzle]] as const" :key="item[0]" :class="{active:tab===item[0]}" @click="tab=item[0]"><component :is="item[2]" :size="14"/>{{item[1]}}</button>
+        </div>
+        <div v-if="errorMessage" class="login-error" style="margin:13px 15px 0">{{errorMessage}}</div>
+        <div class="agent-edit-form">
+          <template v-if="tab==='basic'">
+            <div class="form-field full"><label class="form-label">类型标识<em> *</em></label><input class="form-input" v-model="name" :disabled="!isNew" placeholder="backend-developer"/><p class="field-hint">{{isNew?'小写字母、数字与连字符，创建后不可修改':'类型标识创建后不可修改'}}</p></div>
+            <div class="form-field"><label class="form-label">显示名称<em> *</em></label><input class="form-input" v-model="displayName" placeholder="后端开发工程师"/></div>
+            <div class="form-field"><label class="form-label">默认模型<em> *</em></label><select class="form-input" v-model="model"><option v-for="item in MODEL_OPTIONS" :key="item" :value="item">{{item}}</option></select></div>
+            <div class="form-field full"><label class="form-label">职责说明<em> *</em></label><textarea class="form-textarea" v-model="description" placeholder="描述该智能体负责的工作范围与协作方式"/></div>
+            <label class="form-field full toggle-row"><input type="checkbox" v-model="isActive"/><span class="toggle-control" :class="{on:isActive}"><i></i></span><div><b>启用该智能体类型</b><small>停用后无法在新流程模板中引用</small></div></label>
+          </template>
+          <template v-else-if="tab==='prompt'">
+            <div class="form-field full"><label class="form-label">系统提示词<em> *</em></label><textarea class="form-textarea prompt-textarea" v-model="systemPrompt" placeholder="定义该智能体的角色、职责、约束与输出要求…"/><p class="field-hint">提示词将作为 DeepAgents SubAgent 的 system prompt 注入。</p></div>
+          </template>
+          <template v-else-if="tab==='capabilities'">
+            <div class="form-field full"><label class="form-label">工具能力</label><div class="chip-grid"><label v-for="tool in TOOL_OPTIONS" :key="tool.key" class="chip-check" :class="{on:tools.includes(tool.key)}"><input type="checkbox" :checked="tools.includes(tool.key)" @change="toggleItem(tools,tool.key)"/><span><Check :size="11"/></span><div><b>{{tool.label}}</b><small>{{tool.description}}</small></div></label></div></div>
+            <div class="form-field full"><label class="form-label">Skills 装配</label><div class="chip-grid skills"><label v-for="skill in skillsCatalog" :key="skill.name" class="chip-check" :class="{on:skills.includes(skill.name)}"><input type="checkbox" :checked="skills.includes(skill.name)" @change="toggleItem(skills,skill.name)"/><span><Check :size="11"/></span><div><b>{{skill.displayName||skill.name}}</b><small>{{skill.name}}@{{skill.version}} · {{skill.executable?'沙箱可执行':'Prompt 指令'}}</small></div></label><p v-if="!skillsCatalog.length" class="field-hint">尚未加载任何 Skills，可在「Skill 管理与装配」页扫描目录。</p></div></div>
+          </template>
+          <template v-else-if="tab==='sandbox'">
+            <div class="form-field"><label class="form-label">CPU 核数</label><input class="form-input" v-model.number="cpu" type="number" min="1" max="16"/></div>
+            <div class="form-field"><label class="form-label">内存上限（MB）</label><input class="form-input" v-model.number="memory" type="number" min="64" max="8192" step="64"/></div>
+            <div class="form-field"><label class="form-label">执行超时（秒）</label><input class="form-input" v-model.number="timeout" type="number" min="10" max="3600"/></div>
+            <div class="form-field full"><div class="smart-tip"><ShieldCheck :size="16"/><div><b>沙箱隔离说明</b><span>Skill 代码与生成代码仅在沙箱执行；本地进程沙箱仅提供资源限制，生产环境请配置 Docker 沙箱以获得网络与文件系统隔离。</span></div></div></div>
+          </template>
+          <template v-else>
+            <div class="form-field full"><div class="confirm-list"><div><dt>类型标识</dt><dd>{{agent?.name||name||'—'}}</dd></div><div><dt>配置版本</dt><dd>v{{agent?.version||'1（待创建）'}}</dd></div><div><dt>是否预置</dt><dd>{{agent?.isTemplate?'是':'否'}}</dd></div><div><dt>工具 / Skills</dt><dd>{{tools.length}} / {{skills.length}}</dd></div></div></div>
+            <div class="form-field"><label class="form-label">创建时间</label><div class="field-readonly">{{agent?new Date(agent.createdAt).toLocaleString('zh-CN',{hour12:false}):'—'}}</div></div>
+            <div class="form-field"><label class="form-label">更新时间</label><div class="field-readonly">{{agent?new Date(agent.updatedAt).toLocaleString('zh-CN',{hour12:false}):'—'}}</div></div>
+          </template>
+        </div>
+        <footer class="agent-edit-foot"><button class="button ghost" @click="router.push('/admin/agent-types')"><ArrowLeft :size="15"/>返回列表</button><button class="button primary" :disabled="saving||loading" @click="save"><Save :size="16"/>{{saving?'保存中…':'保存配置'}}</button></footer>
+      </section>
+    </template>
+  </div>
+</template>

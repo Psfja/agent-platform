@@ -1,0 +1,14 @@
+# API 镜像构建上下文排除项（构建上下文为 backend/）
+.venv
+venv
+__pycache__
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.coverage
+data
+.env
+*.db
+tests
+docker/agent-build.Dockerfile
+docker-compose.infrastructure.yml
