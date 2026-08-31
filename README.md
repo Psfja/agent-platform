@@ -21,6 +21,7 @@
 - [主要 API](#主要-api)
 - [测试与验证](#测试与验证)
 - [演示账号](#演示账号)
+- [改进路线](#改进路线)
 - [当前边界](#当前边界)
 
 ---
@@ -752,19 +753,19 @@ cd backend
 .venv/bin/python -m alembic heads   # 迁移单 head 校验
 ```
 
-推送分支或发起 PR 后，`.github/workflows/ci.yml` 会自动执行上述全部检查。
+`.github/workflows/ci.yml`（pytest/Alembic + Vitest/构建/audit 流水线）已随仓库准备好；由于当前推送使用的 GitHub App 令牌缺少 workflows 权限，该文件尚未进入远程分支，请用具备权限的账号提交一次即可启用自动检查。
 
 当前结果：
 
 - 后端集成测试：`31 passed`
 - 前端单元测试：`62 passed`（API 客户端、路由守卫、OIDC 回调、管理页、流程图、对话面板/工具模式/审批）
 - 前端设计审计：`ui-redesign` Skill 18/18 项通过
-- Playwright E2E：登录导航、项目工作区、流程编排 3 组用例（`scripts/e2e.sh`，需可下载浏览器与模型 Key 的网络环境）
+- Playwright E2E：登录导航、项目工作区、流程编排 3 组用例（`scripts/e2e.sh`；登录/导航类用例无需模型 Key，需可下载 Chromium 的网络环境）
 - 安全与验收脚手架：`scripts/security.sh`（Semgrep/Trivy/Syft）、`locustfile.py` 并发压测
 - TypeScript 检查：通过
 - Vite Production Build：通过
 - npm audit：`0 vulnerabilities`
-- Alembic：`0003_content_integrations`，与 Head 一致
+- Alembic：`0005_conversation_agent`，与 Head 一致
 
 集成测试覆盖：
 
@@ -814,19 +815,51 @@ Agent@2026
 
 ---
 
+## 改进路线
+
+按优先级排列的后续计划；标注「免 Key」的项不依赖模型/外部服务即可实施。
+
+### P0 · 真实模型端到端验证
+
+- 配置 `LLM_API_KEY` 后跑通首次真实 DeepAgents Build（规划→生成→pytest-cov≥80%→Vitest→Vite build→修复闭环），按真实模型行为调优 Prompt 与门禁
+- 真实跑通智能体对话（聊天模式 + 工具模式：写文件/沙箱/HITL 审批）与 AI 流程生成
+
+### P1 · 即将完成
+
+- CI 工作流入库（文件已就绪，等具备 workflows 权限的账号推送）
+- 对话记忆语义向量召回在真实网关上的联调（当前降级关键词+重要度排序，功能可用）
+
+### P2 · 生产级加固
+
+- Playwright E2E 实跑、SAST/镜像扫描/SBOM 接入 CI、大规模并发验收
+- 固定域名、HTTPS 与蓝绿流量代理（含 Nginx TLS 模板）
+- 多节点部署下的并发锁与队列水平扩展验证
+- 审计日志可视化（管理后台）
+
+### P3 · 企业重复性工作方向（底座已具备，需执行层）
+
+- 通用 `agent_task` 执行链路：提交任务 → 选 Agent/Skill → 沙箱执行 → 结果/审批/通知（复用对话工具模式与流程编排）
+- 文档处理 Skills：Excel/PDF 字段抽取、清洗比对、报表生成
+- 定时/触发调度：cron、Webhook 触发重复任务
+- 企业连接器：IMAP 邮箱、企微/钉钉机器人、数据库只读适配器
+- 业务任务模板库：常见重复工作沉淀为一键复用模板
+
+---
+
 ## 当前边界
 
 已实现核心能力，但以下内容仍需部署环境或后续增强：
 
-- 真实模型 Key 未配置时不能运行 DeepAgents Build
-- 当前预览环境未提供 Redis、MinIO、PostgreSQL、Docker daemon 和 Git Remote
+- 真实模型 Key 未配置时不能运行 DeepAgents Build 与智能体对话/流程生成（接口会明确返回 503，绝不 Mock）
+- 尚未进行真实模型的端到端首跑验证（当前全部验证基于脚本化模型与真实质量门禁）
+- CI 工作流文件已准备好，但需具备 workflows 权限的账号推送入库后才会自动执行
+- Playwright E2E 用例与一键脚本已就绪，需可下载 Chromium 的网络环境实跑
+- SAST（Semgrep）、镜像扫描（Trivy）、SBOM（Syft）与并发压测（Locust）脚手架已提供，实跑需对应工具与 Docker daemon
 - 企业微信专用 OAuth 与钉钉专用消息格式尚未单独封装
 - Docker 部署使用动态端口，尚未接入固定域名、HTTPS 和蓝绿流量代理
 - 本地进程沙箱不提供可靠网络/文件系统边界，生产必须使用 Docker Sandbox
-- LangGraph Checkpointer 自动选择：PostgreSQL 部署切换 PostgresSaver，连接失败回退 SQLite（无需额外配置）
 - 生成应用 PostgreSQL 回滚依赖部署机器安装 `pg_dump` 和 `pg_restore`
 - 平台 Docker 镜像与 `docker-compose.production.yml` 已在无 Docker 环境做静态校验，首次使用时请在具备 Docker daemon 的机器上完成镜像构建验证
-- 仍需补充 Playwright E2E、SAST、镜像扫描、SBOM 和大规模并发验收
 
 ---
 
