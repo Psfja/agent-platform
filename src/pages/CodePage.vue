@@ -1,23 +1,114 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Archive, Box, Braces, Check, ChevronDown, ChevronRight, Clipboard, CloudDownload, Code2, FileCode2, FileJson, FileText, Folder, FolderOpen, GitBranch, GitCommit, History, Search, Settings2 } from 'lucide-vue-next'
+import { computed, onMounted, ref } from 'vue'
+import { ChevronDown, ChevronRight, Clipboard, CloudDownload, Code2, FileCode2, FileJson, FileText, Folder, FolderOpen, GitBranch, History, Search, X } from 'lucide-vue-next'
+import { useRoute, useRouter } from 'vue-router'
+import { api, type AgentBuildRecord } from '../api/client'
 import { useAppStore } from '../stores/app'
 import PageTitle from '../components/PageTitle.vue'
+import StatusBadge from '../components/StatusBadge.vue'
 
-const app=useAppStore();const branch=ref('main');const selected=ref('backend/app/services/approval.py');const query=ref('');const copied=ref(false)
-const tree=[{type:'folder',name:'backend',open:true,children:[{type:'folder',name:'app',open:true,children:[{type:'folder',name:'api',children:[]},{type:'folder',name:'models',children:[]},{type:'folder',name:'services',open:true,children:[{type:'file',name:'approval.py',path:'backend/app/services/approval.py'},{type:'file',name:'export.py',path:'backend/app/services/export.py'},{type:'file',name:'quota.py',path:'backend/app/services/quota.py'}]},{type:'file',name:'main.py',path:'backend/app/main.py'}]},{type:'file',name:'requirements.txt',path:'backend/requirements.txt'}]},{type:'folder',name:'frontend',children:[]},{type:'folder',name:'tests',children:[]},{type:'file',name:'docker-compose.yml',path:'docker-compose.yml'},{type:'file',name:'README.md',path:'README.md'}]
-const lines=[
-'from __future__ import annotations','', 'from dataclasses import dataclass','from datetime import datetime','', 'from app.models import ApprovalPolicy, LeaveRequest','from app.repositories.users import UserRepository','', '', '@dataclass(slots=True)','class ApprovalContext:','    applicant_id: str','    department_id: str','    leave_type: str','    duration_days: float','', '', 'class ApprovalService:','    def __init__(self, users: UserRepository) -> None:','        self.users = users','', '    async def resolve_approvers(','        self, request: LeaveRequest, policy: ApprovalPolicy','    ) -> list[str]:','        """Resolve a configurable approval chain."""','        levels = policy.enabled_levels','        if not levels:','            raise ValueError("审批链不能为空")','', '        context = ApprovalContext(','            applicant_id=request.applicant_id,','            department_id=request.department_id,','            leave_type=request.leave_type,','            duration_days=request.duration_days,','        )','        approvers: list[str] = []','        for level in levels:','            user_id = await self.users.resolve_level(level, context)','            if user_id not in approvers:','                approvers.append(user_id)','', '        return approvers']
-function copy(){navigator.clipboard?.writeText(lines.join('\n'));copied.value=true;window.setTimeout(()=>copied.value=false,1500)}
+const route=useRoute();const router=useRouter();const app=useAppStore()
+const projectId=String(route.params.id)
+const builds=ref<AgentBuildRecord[]>([]);const loading=ref(false);const errorMessage=ref('')
+const selectedBuild=ref<AgentBuildRecord|null>(null)
+const fileContent=ref<string|null>(null);const selectedPath=ref('');const loadingFile=ref(false)
+const query=ref('');const expanded=ref<Record<string,boolean>>({});const copied=ref(false)
+
+interface TreeNode { name:string; path:string; dir:boolean; children:TreeNode[] }
+function buildTree(paths:string[]):TreeNode[]{
+  const root:TreeNode[]=[]
+  const index:Record<string,TreeNode>={}
+  for(const path of paths){
+    const parts=path.split('/');let current=root
+    let prefix=''
+    for(let i=0;i<parts.length;i++){
+      const name=parts[i];const dir=i<parts.length-1
+      prefix=prefix?`${prefix}/${name}`:name
+      let node=current.find(n=>n.name===name&&n.dir===dir)
+      if(!node){node={name,path:prefix,dir,children:[]};current.push(node);index[prefix]=node}
+      current=node.children
+    }
+  }
+  return root
+}
+const tree=computed(()=>selectedBuild.value?buildTree(selectedBuild.value.generatedFiles.map(f=>f.path)):[])
+function matches(node:TreeNode):boolean{
+  if(node.name.toLowerCase().includes(query.value.toLowerCase()))return true
+  return node.children.some(matches)
+}
+function visible(root:TreeNode[]):TreeNode[]{
+  const result:TreeNode[]=[]
+  for(const node of root){if(matches(node))result.push(node)}
+  return result
+}
+const fileCount=computed(()=>selectedBuild.value?.generatedFiles.length||0)
+async function load(){
+  loading.value=true;errorMessage.value=''
+  try{
+    builds.value=await api.agentBuilds(projectId)
+    selectedBuild.value=builds.value.find(b=>b.generatedFiles?.length)||null
+    if(selectedBuild.value){
+      expanded.value={}
+      if(tree.value.length)expanded.value[tree.value[0].path]=true
+      if(tree.value[0]?.children[0])expanded.value[tree.value[0].children[0].path]=true
+    }
+  }catch(error){errorMessage.value=error instanceof Error?error.message:'无法加载构建记录'}
+  finally{loading.value=false}
+}
+async function openFile(node:TreeNode){
+  if(node.dir){expanded.value[node.path]=!expanded.value[node.path];return}
+  if(!selectedBuild.value)return
+  selectedPath.value=node.path;loadingFile.value=true;fileContent.value=null
+  try{const result=await api.agentBuildFile(projectId,selectedBuild.value.id,node.path);fileContent.value=result.content??''}
+  catch(error){app.toast('读取失败',error instanceof Error?error.message:'请稍后重试')}
+  finally{loadingFile.value=false}
+}
+async function copy(){if(!fileContent.value)return;await navigator.clipboard?.writeText(fileContent.value);copied.value=true;window.setTimeout(()=>copied.value=false,1500)}
+function download(){if(selectedBuild.value)window.location.assign(api.agentBuildDownloadUrl(projectId,selectedBuild.value.id))}
+function fmtSize(bytes:number){return bytes>=1024?`${(bytes/1024).toFixed(1)} KB`:`${bytes} B`}
+async function pickBuild(id:string){const build=builds.value.find(b=>b.id===id);if(!build)return;selectedBuild.value=build;selectedPath.value='';fileContent.value=null;expanded.value={};if(tree.value.length)expanded.value[tree.value[0].path]=true}
+onMounted(load)
 </script>
 
 <template>
   <div class="code-page">
-    <div class="content-width"><PageTitle title="代码仓库" description="在线浏览智能体生成的项目代码与版本提交记录。"><button class="button secondary" @click="app.toast('代码已打包','ZIP 下载任务已创建。')"><CloudDownload :size="16"/>下载 ZIP</button><button class="button primary" @click="app.toast('Git 仓库','代码已同步至企业 Git 仓库。')"><GitBranch :size="16"/>打开 Git 仓库</button></PageTitle><section class="repo-summary"><div><span><Code2 :size="19"/></span><div><small>当前仓库</small><strong>leave-hub / employee-leave-platform</strong></div></div><div class="repo-branch"><GitBranch :size="15"/><b>{{branch}}</b><ChevronDown :size="14"/></div><div class="commit-info"><GitCommit :size="15"/><code>3a94f21</code><span>feat: add async report export</span><small>林嘉 · 42 分钟前</small></div><button><History :size="15"/>128 次提交</button></section></div>
-    <div class="code-workspace">
-      <aside class="repository-tree"><div class="repo-search"><Search :size="14"/><input v-model="query" placeholder="搜索文件"/></div><div class="tree-root"><FolderOpen :size="15"/><b>employee-leave-platform</b></div><div class="tree-list"><template v-for="node in tree" :key="node.name"><div class="tree-row level-0"><ChevronDown v-if="node.type==='folder'&&node.open" :size="13"/><ChevronRight v-else-if="node.type==='folder'" :size="13"/><component :is="node.type==='folder'?Folder:node.name.endsWith('.md')?FileText:FileCode2" :size="15"/><span>{{node.name}}</span></div><template v-if="node.children"><template v-for="child in node.children" :key="child.name"><div class="tree-row level-1"><ChevronDown v-if="child.open" :size="13"/><ChevronRight v-else-if="child.type==='folder'" :size="13"/><component :is="child.type==='folder'?Folder:FileCode2" :size="15"/><span>{{child.name}}</span></div><template v-if="child.children"><template v-for="grand in child.children" :key="grand.name"><div class="tree-row level-2"><ChevronDown v-if="grand.open" :size="13"/><ChevronRight v-else-if="grand.type==='folder'" :size="13"/><component :is="grand.type==='folder'?Folder:FileCode2" :size="15"/><span>{{grand.name}}</span></div><template v-if="grand.children"><div v-for="file in grand.children" :key="file.name" class="tree-row level-3" :class="{active:selected===file.path}" @click="selected=file.path"><FileCode2 :size="14"/><span>{{file.name}}</span><i v-if="file.name==='export.py'">M</i></div></template></template></template></template></template></template></div></aside>
-      <main class="code-editor-panel"><header><div class="editor-breadcrumb"><span>backend</span><ChevronRight :size="13"/><span>app</span><ChevronRight :size="13"/><span>services</span><ChevronRight :size="13"/><b>{{selected.split('/').pop()}}</b></div><div><button @click="copy"><Check v-if="copied" :size="14"/><Clipboard v-else :size="14"/>{{copied?'已复制':'复制'}}</button><button><Settings2 :size="15"/></button></div></header><div class="editor-tabs"><button class="active"><FileCode2 :size="14"/>{{selected.split('/').pop()}}<span>×</span></button><button><FileCode2 :size="14"/>export.py<span>×</span><i></i></button></div><div class="code-editor"><div v-for="(line,index) in lines" :key="index" :class="{'highlight-code':index>=24&&index<=27}"><i>{{index+1}}</i><code v-html="line.replace(/(from|import|class|def|async|await|for|in|if|not|raise|return)/g,'<b>$1</b>').replace(/(ApprovalService|ApprovalContext|ValueError)/g,'<em>$1</em>') || ' '"></code></div></div><footer><span>Python</span><span>UTF-8</span><span>LF</span><span class="code-ok"><Check :size="13"/>0 个问题</span><span>行 25，列 9</span></footer></main>
-      <aside class="code-inspector"><header><strong>文件信息</strong></header><dl><div><dt>文件大小</dt><dd>5.2 KB</dd></div><div><dt>代码行数</dt><dd>143</dd></div><div><dt>最近修改</dt><dd>42 分钟前</dd></div><div><dt>代码覆盖率</dt><dd class="green-text">96.4%</dd></div></dl><section><h4>最近提交</h4><article><span class="member-avatar">BE</span><div><b>feat: 支持异步报表导出</b><code>3a94f21</code><small>后端开发智能体 · 42 分钟前</small></div></article><article><span class="member-avatar">CR</span><div><b>refactor: 优化审批链解析</b><code>7bd4c18</code><small>代码审查智能体 · 4 天前</small></div></article></section><section><h4>代码质量</h4><div class="quality-row"><span>可维护性</span><b>A</b></div><div class="quality-row"><span>重复率</span><b>1.2%</b></div><div class="quality-row"><span>安全问题</span><b class="green-text">0</b></div></section></aside>
+    <div class="content-width">
+      <PageTitle title="代码仓库" description="在线浏览智能体真实生成的源码文件与构建记录。">
+        <button class="button secondary" :disabled="!selectedBuild" @click="download"><CloudDownload :size="16"/>下载 ZIP</button>
+        <button class="button primary" @click="router.push(`/projects/${projectId}/build`)"><Code2 :size="16"/>AI 全栈构建</button>
+      </PageTitle>
+      <div v-if="errorMessage" class="admin-empty"><p>{{errorMessage}}</p><button class="button secondary" @click="load">重试</button></div>
+      <section v-else-if="selectedBuild" class="repo-summary">
+        <div><span><Code2 :size="19"/></span><div><small>当前构建</small><strong>{{selectedBuild.mode==='incremental'?'增量':'初始'}}构建 · {{selectedBuild.model}}</strong></div></div>
+        <select class="repo-branch-select" :value="selectedBuild.id" @change="pickBuild(($event.target as HTMLSelectElement).value)"><option v-for="build in builds" :key="build.id" :value="build.id">{{build.id.slice(0,8)}} · {{build.mode==='incremental'?'增量':'初始'}} · {{new Date(build.createdAt).toLocaleDateString('zh-CN')}}</option></select>
+        <div class="commit-info"><History :size="15"/><code>{{selectedBuild.generatedFiles.length}} 个文件</code><span>{{selectedBuild.createdAt}}</span><small>覆盖率 {{selectedBuild.coverage??'—'}}%</small></div>
+        <StatusBadge :status="selectedBuild.status"/>
+      </section>
+      <div v-else-if="!loading" class="admin-empty"><p>暂无生成源码 · 完成一次「AI 全栈构建」后即可在线浏览文件。</p><button class="button primary" @click="router.push(`/projects/${projectId}/build`)">前往构建</button></div>
+    </div>
+    <div v-if="selectedBuild" class="code-workspace">
+      <aside class="repository-tree">
+        <div class="repo-search"><Search :size="14"/><input v-model="query" placeholder="搜索文件"/></div>
+        <div class="tree-root"><FolderOpen :size="15"/><b>{{fileCount}} 个文件</b></div>
+        <div class="tree-list">
+          <template v-for="node in visible(tree)" :key="node.path">
+            <div class="tree-row level-0" @click="openFile(node)"><ChevronDown v-if="node.dir&&expanded[node.path]" :size="13"/><ChevronRight v-else-if="node.dir" :size="13"/><component :is="node.dir?Folder:node.name.endsWith('.md')||node.name.endsWith('.json')?FileJson:FileCode2" :size="15"/><span>{{node.name}}</span></div>
+            <template v-if="node.dir&&expanded[node.path]">
+              <template v-for="child in node.children" :key="child.path">
+                <div class="tree-row level-1" @click="openFile(child)"><ChevronDown v-if="child.dir&&expanded[child.path]" :size="13"/><ChevronRight v-else-if="child.dir" :size="13"/><component :is="child.dir?Folder:child.name.endsWith('.md')?FileText:FileCode2" :size="15"/><span>{{child.name}}</span></div>
+                <template v-if="child.dir&&expanded[child.path]"><div v-for="grand in child.children" :key="grand.path" class="tree-row level-2" :class="{active:selectedPath===grand.path}" @click="openFile(grand)"><component :is="grand.dir?Folder:FileCode2" :size="14"/><span>{{grand.name}}</span></div></template>
+              </template>
+            </template>
+          </template>
+        </div>
+      </aside>
+      <main class="code-editor-panel">
+        <header><div class="editor-breadcrumb"><span>构建</span><ChevronRight :size="13"/><span>{{selectedBuild.id.slice(0,8)}}</span><template v-if="selectedPath"><ChevronRight :size="13"/><b>{{selectedPath.split('/').pop()}}</b></template></div><div><button :disabled="!fileContent" @click="copy"><Clipboard :size="14"/>{{copied?'已复制':'复制'}}</button><button @click="selectedPath='';fileContent=null"><X :size="15"/></button></div></header>
+        <div v-if="loadingFile" class="code-editor"><div class="deployment-empty-row">正在读取文件…</div></div>
+        <pre v-else-if="fileContent!==null" class="code-editor code-pre">{{fileContent}}</pre>
+        <div v-else class="code-editor"><div class="deployment-empty-row">从左侧文件树选择文件查看内容</div></div>
+        <footer v-if="selectedPath"><span>{{selectedPath.split('.').pop()?.toUpperCase()}}</span><span>UTF-8</span><span class="code-ok">{{selectedBuild.generatedFiles.find(f=>f.path===selectedPath)?.size?fmtSize(selectedBuild.generatedFiles.find(f=>f.path===selectedPath)!.size):''}}</span></footer>
+      </main>
     </div>
   </div>
 </template>

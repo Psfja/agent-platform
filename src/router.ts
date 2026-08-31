@@ -16,6 +16,7 @@ import DeploymentsPage from './pages/DeploymentsPage.vue'
 import AgentRuntimePage from './pages/AgentRuntimePage.vue'
 import AgentBuildPage from './pages/AgentBuildPage.vue'
 import LoginPage from './pages/LoginPage.vue'
+import LoginCallbackPage from './pages/LoginCallbackPage.vue'
 import AgentTypesPage from './pages/admin/AgentTypesPage.vue'
 import AgentTypeEditPage from './pages/admin/AgentTypeEditPage.vue'
 import SkillsPage from './pages/admin/SkillsPage.vue'
@@ -29,6 +30,7 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: '/projects' },
     { path: '/login', component: LoginPage, meta: { title: '登录', layout: 'blank' } },
+    { path: '/login/callback', component: LoginCallbackPage, meta: { title: '企业身份认证', layout: 'blank' } },
     { path: '/projects', component: ProjectsPage, meta: { title: '项目空间' } },
     { path: '/projects/:id', component: DashboardPage, meta: { title: '项目概览', project: true } },
     { path: '/projects/:id/requirements', component: RequirementsPage, meta: { title: '需求说明书', project: true } },

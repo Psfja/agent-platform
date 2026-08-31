@@ -1,81 +1,102 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Activity, AlertTriangle, ArrowRight, Bot, Check, CheckCircle2, ChevronRight, Clock3, Code2, ExternalLink, FileCode2, GitBranch, ListChecks, MoreHorizontal, Pause, Play, Rocket, ShieldCheck, Sparkles, Users, Workflow, Zap } from 'lucide-vue-next'
+import { ArrowRight, Bot, CheckCircle2, Clock3, Code2, ExternalLink, ListChecks, Pause, Play, Rocket, Sparkles } from 'lucide-vue-next'
 import { useAppStore } from '../stores/app'
-import { api } from '../api/client'
-import { tasks } from '../data/mock'
+import { api, type AgentBuildRecord, type ApplicationDeploymentRecord } from '../api/client'
+import type { Project, Task } from '../types'
 import ChangeRequestDialog from '../components/ChangeRequestDialog.vue'
 import PageTitle from '../components/PageTitle.vue'
 import ProgressRing from '../components/ProgressRing.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 
 const route = useRoute(); const router = useRouter(); const app = useAppStore()
-const project = computed(() => app.projects.find(p => p.id === route.params.id) || app.projects[0])
-const showChange = ref(false); const paused = ref(false)
-const activeTasks = computed(() => tasks.filter(t => t.status === 'in_progress'))
-function togglePause(){ paused.value=!paused.value; app.toast(paused.value?'项目已暂停':'项目已继续', paused.value?'所有智能体将在当前工具调用完成后暂停。':'智能体执行队列已恢复。') }
+const projectId = String(route.params.id)
+const project = ref<Project|null>(null)
+const tasks = ref<Task[]>([])
+const builds = ref<AgentBuildRecord[]>([])
+const deployments = ref<ApplicationDeploymentRecord[]>([])
+const loading = ref(true); const errorMessage = ref(''); const showChange = ref(false); const busy = ref(false)
+
+const latestBuild = computed(() => builds.value[0] || null)
+const runningBuild = computed(() => builds.value.find(b => b.status === 'running' || b.status === 'waiting_approval') || null)
+const latestDeployment = computed(() => deployments.value.find(d => d.status === 'running') || deployments.value[0] || null)
+const doneTasks = computed(() => tasks.value.filter(t => t.status === 'completed').length)
+const heroTitle = computed(() => {
+  if (runningBuild.value) return runningBuild.value.status === 'waiting_approval' ? '等待人工审批' : `构建进行中 · ${runningBuild.value.currentStage || '准备中'}`
+  if (latestDeployment.value && latestDeployment.value.status === 'running') return `已部署 · ${latestDeployment.value.version || 'latest'}`
+  if (latestBuild.value?.status === 'completed') return '最近构建已完成'
+  return '尚无构建记录'
+})
+const heroText = computed(() => {
+  if (runningBuild.value) return runningBuild.value.status === 'waiting_approval' ? 'Agent 发起了敏感操作审批，请到 AI 全栈构建页面处理。' : 'DeepAgents 正在执行构建阶段，可在 AI 全栈构建页面实时查看。'
+  if (latestDeployment.value && latestDeployment.value.status === 'running') return `${latestDeployment.value.backendContainer} / ${latestDeployment.value.frontendContainer} 正在运行。`
+  if (latestBuild.value?.status === 'completed') return '通过「AI 全栈构建」发起新构建，或「提出新需求」触发增量迭代。'
+  return '通过「AI 全栈构建」提交需求，由多智能体协作生成应用。'
+})
+const activeAgents = computed(() => [...new Set(tasks.value.filter(t => t.status === 'in_progress').map(t => t.agentShort || t.agent))])
+async function load() {
+  loading.value = true; errorMessage.value = ''
+  try {
+    const [p, t, b, d] = await Promise.all([api.project(projectId), api.tasks(projectId), api.agentBuilds(projectId).catch(() => []), api.applicationDeployments(projectId).catch(() => [])])
+    project.value = p; tasks.value = t; builds.value = b; deployments.value = d
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '无法加载项目数据'
+  } finally { loading.value = false }
+}
+async function togglePause() {
+  if (!project.value) return
+  busy.value = true
+  try {
+    const updated = await api.projectAction(projectId, project.value.status === 'paused' ? 'resume' : 'pause')
+    project.value = updated
+    app.toast(updated.status === 'paused' ? '项目已暂停' : '项目已继续', '项目状态已通过后端更新。')
+  } catch (error) { app.toast('操作失败', error instanceof Error ? error.message : '请稍后重试') }
+  finally { busy.value = false }
+}
+onMounted(load)
 </script>
 
 <template>
   <div class="content-width dashboard-page">
-    <PageTitle :eyebrow="`项目 / ${project.template}`" :title="project.name" :description="project.description">
-      <button class="button secondary" @click="togglePause"><Play v-if="paused" :size="16"/><Pause v-else :size="16"/>{{ paused?'继续执行':'暂停项目' }}</button>
-      <button class="button primary" @click="showChange=true"><Sparkles :size="17"/>提出新需求</button>
-    </PageTitle>
+    <div v-if="errorMessage" class="admin-empty"><p>{{errorMessage}}</p><button class="button secondary" @click="load">重试</button></div>
+    <template v-else>
+      <PageTitle :eyebrow="project?`项目 / ${project.template}`:'项目'" :title="project?.name||'加载中…'" :description="project?.description||''">
+        <button class="button secondary" :disabled="busy||!project" @click="togglePause"><Play v-if="project?.status==='paused'" :size="16"/><Pause v-else :size="16"/>{{project?.status==='paused'?'继续执行':'暂停项目'}}</button>
+        <button class="button primary" @click="showChange=true"><Sparkles :size="17"/>提出新需求</button>
+      </PageTitle>
 
-    <section class="project-hero-card">
-      <div class="hero-progress"><ProgressRing :value="project.progress" :size="82" :stroke="7"/><div><div class="hero-status-line"><StatusBadge :status="paused?'paused':project.status"/><span>增量迭代 · v1.3.0</span></div><h2>{{ paused ? '项目已暂停，等待继续执行' : '回归测试正在执行' }}</h2><p>{{ paused ? '任务上下文与执行状态已安全保存。' : '测试工程师正在验证 Excel 导出功能，并执行已有功能回归测试。' }}</p></div></div>
-      <div class="hero-live"><span class="live-agent-avatar">QA<i></i></span><div><small>当前执行智能体</small><strong>测试工程师</strong><span><Clock3 :size="13"/>已运行 31 分钟</span></div><button class="button subtle" @click="router.push(`/projects/${project.id}/tasks/t-test`)">实时查看<ArrowRight :size="15"/></button></div>
-    </section>
-
-    <div class="metric-grid">
-      <article><span class="metric-icon indigo"><ListChecks :size="19"/></span><div><small>任务完成</small><strong>18 <em>/ 25</em></strong><span class="trend positive">较昨日 +6</span></div></article>
-      <article><span class="metric-icon green"><CheckCircle2 :size="19"/></span><div><small>测试通过率</small><strong>98.7<em>%</em></strong><span class="trend positive">+2.1%</span></div></article>
-      <article><span class="metric-icon blue"><Bot :size="19"/></span><div><small>活跃智能体</small><strong>2 <em>/ 8</em></strong><span class="trend">6 个已完成</span></div></article>
-      <article><span class="metric-icon amber"><Zap :size="19"/></span><div><small>Token 消耗</small><strong>142.6<em>k</em></strong><span class="trend">预算内 64%</span></div></article>
-    </div>
-
-    <div class="dashboard-grid">
-      <section class="panel pipeline-panel">
-        <header class="panel-title"><div><h3>执行流水线</h3><p>Web 全栈应用 · 增量模式</p></div><button class="text-button" @click="router.push(`/projects/${project.id}/tasks`)" >查看任务树<ArrowRight :size="15"/></button></header>
-        <div class="pipeline-track">
-          <div class="pipeline-stage done"><span><Check :size="15"/></span><b>影响分析</b><small>12m</small></div><i class="done"></i>
-          <div class="pipeline-stage done"><span><Check :size="15"/></span><b>方案设计</b><small>18m</small></div><i class="done"></i>
-          <div class="pipeline-stage done"><span><Check :size="15"/></span><b>增量开发</b><small>48m</small></div><i class="done"></i>
-          <div class="pipeline-stage active"><span>4</span><b>回归测试</b><small>68%</small></div><i></i>
-          <div class="pipeline-stage"><span>5</span><b>部署验证</b><small>待执行</small></div>
-        </div>
-        <div class="active-task-box">
-          <div class="task-agent"><span>QA</span><i></i></div>
-          <div class="task-active-copy"><span class="running-label"><i></i>正在运行</span><strong>回归测试与质量验证</strong><p>执行 128 项既有用例 + 24 项新增导出测试</p></div>
-          <div class="active-progress"><span><b>104</b> / 152</span><div><i style="width:68%"></i></div><small>预计还需 14 分钟</small></div>
-        </div>
+      <section class="project-hero-card">
+        <div class="hero-progress"><ProgressRing :value="project?.progress||0" :size="82" :stroke="7"/><div><div class="hero-status-line"><StatusBadge v-if="project" :status="project.status"/><span>{{project?.version&&project.version!=='—'?`当前版本 ${project.version}`:'尚未构建'}}</span></div><h2>{{heroTitle}}</h2><p>{{heroText}}</p></div></div>
+        <div v-if="runningBuild" class="hero-live"><span class="live-agent-avatar">AI<i></i></span><div><small>当前执行智能体</small><strong>{{runningBuild.currentStage||'构建中'}}</strong><span><Clock3 :size="13"/>进度 {{runningBuild.progress}}%</span></div><button class="button subtle" @click="router.push(`/projects/${projectId}/build`)">实时查看<ArrowRight :size="15"/></button></div>
+        <div v-else-if="latestDeployment && latestDeployment.status==='running'" class="hero-live"><span class="live-agent-avatar">DO<i></i></span><div><small>当前部署</small><strong>{{latestDeployment.version||'latest'}} · {{latestDeployment.environment}}</strong><span><Clock3 :size="13"/>{{latestDeployment.hostPort?`端口 ${latestDeployment.hostPort}`:'容器运行中'}}</span></div><a class="button subtle" :href="latestDeployment.deployUrl" target="_blank" rel="noopener">访问应用<ExternalLink :size="14"/></a></div>
       </section>
 
-      <section class="panel health-panel">
-        <header class="panel-title"><div><h3>项目健康度</h3><p>AI 每 5 分钟动态评估</p></div><button class="icon-button"><MoreHorizontal :size="18"/></button></header>
-        <div class="health-score"><div class="gauge"><svg viewBox="0 0 120 68"><path d="M10 60 A50 50 0 0 1 110 60" pathLength="100"/><path class="gauge-value" d="M10 60 A50 50 0 0 1 110 60" pathLength="100"/></svg><strong>92</strong><small>健康</small></div></div>
-        <div class="health-list"><div><span>进度健康</span><b class="green-text">良好</b></div><div><span>质量风险</span><b class="green-text">低</b></div><div><span>资源使用</span><b>正常</b></div></div>
-        <div class="ai-insight"><Sparkles :size="16"/><p><b>AI 评估</b>当前进展顺利。建议关注大数据量导出场景的内存峰值，已加入测试范围。</p></div>
-      </section>
+      <div class="metric-grid">
+        <article><span class="metric-icon indigo"><ListChecks :size="19"/></span><div><small>任务完成</small><strong>{{doneTasks}} <em>/ {{tasks.length}}</em></strong><span class="trend positive">真实任务数据</span></div></article>
+        <article><span class="metric-icon green"><CheckCircle2 :size="19"/></span><div><small>成功构建</small><strong>{{builds.filter(b=>b.status==='completed').length}}<em> 次</em></strong><span class="trend positive">失败 {{builds.filter(b=>b.status==='failed').length}} 次</span></div></article>
+        <article><span class="metric-icon blue"><Bot :size="19"/></span><div><small>活跃智能体</small><strong>{{activeAgents.length}} <em>/ {{new Set(tasks.map(t=>t.agentShort)).size}}</em></strong><span class="trend">{{tasks.filter(t=>t.status==='completed').length}} 个已完成</span></div></article>
+        <article><span class="metric-icon amber"><Rocket :size="19"/></span><div><small>部署</small><strong>{{deployments.filter(d=>d.status==='running').length}}<em> 运行中</em></strong><span class="trend">{{deployments.length}} 条记录</span></div></article>
+      </div>
 
-      <section class="panel recent-tasks-panel">
-        <header class="panel-title"><div><h3>最近任务</h3><p>智能体团队最新执行情况</p></div><button class="text-button" @click="router.push(`/projects/${project.id}/tasks`)" >全部任务<ArrowRight :size="15"/></button></header>
-        <div class="recent-task-list">
-          <button v-for="task in tasks.slice(2,7)" :key="task.id" @click="router.push(`/projects/${project.id}/tasks/${task.id}`)"><span class="agent-square">{{ task.agentShort }}</span><div><strong>{{ task.name }}</strong><small>{{ task.agent }} · {{ task.duration }}</small></div><StatusBadge :status="task.status"/><ChevronRight :size="16"/></button>
-        </div>
-      </section>
-
-      <section class="panel activity-panel">
-        <header class="panel-title"><div><h3>项目动态</h3><p>今天</p></div><button class="icon-button"><MoreHorizontal :size="18"/></button></header>
-        <div class="activity-list">
-          <div><span class="activity-dot green"><CheckCircle2 :size="14"/></span><p><b>代码审查通过</b><small>未发现阻塞项，记录 3 条优化建议</small></p><time>26 分钟前</time></div>
-          <div><span class="activity-dot indigo"><GitBranch :size="14"/></span><p><b>合并增量代码</b><small>12 个文件，+684 / −57 行</small></p><time>42 分钟前</time></div>
-          <div><span class="activity-dot blue"><Users :size="14"/></span><p><b>赵玮确认影响分析</b><small>启动 v1.3.0 增量迭代</small></p><time>2 小时前</time></div>
-        </div>
-      </section>
-    </div>
-    <ChangeRequestDialog v-if="showChange" @close="showChange=false"/>
+      <div class="dashboard-columns">
+        <section class="panel dashboard-tasks-card">
+          <header class="panel-title"><div><h3>任务概览</h3><p>来自后端真实任务树</p></div><button class="text-button" @click="router.push(`/projects/${projectId}/tasks`)">查看任务树<ArrowRight :size="14"/></button></header>
+          <div class="dashboard-task-list">
+            <button v-for="task in tasks.slice(0,6)" :key="task.id" @click="router.push(`/projects/${projectId}/tasks/${task.id}`)"><StatusBadge :status="task.status"/><div><b>{{task.name}}</b><small>{{task.agent}}</small></div><span>{{task.duration}}</span></button>
+            <div v-if="!tasks.length" class="deployment-empty-row">暂无任务 · 创建项目后由项目经理智能体自动规划</div>
+          </div>
+        </section>
+        <section class="panel dashboard-builds-card">
+          <header class="panel-title"><div><h3>构建与部署</h3><p>最近的 Agent Build 与部署记录</p></div><button class="text-button" @click="router.push(`/projects/${projectId}/build`)">AI 全栈构建<ArrowRight :size="14"/></button></header>
+          <div class="dashboard-build-list">
+            <button v-for="build in builds.slice(0,4)" :key="build.id" @click="router.push(`/projects/${projectId}/build`)"><span class="metric-icon indigo" style="width:31px;height:31px"><Code2 :size="15"/></span><div><b>{{build.mode==='incremental'?'增量':'初始'}}构建 · {{build.model}}</b><small>{{build.createdAt}}</small></div><StatusBadge :status="build.status"/></button>
+            <button v-for="deployment in deployments.slice(0,2)" :key="deployment.id" @click="router.push(`/projects/${projectId}/deployments`)"><span class="metric-icon green" style="width:31px;height:31px"><Rocket :size="15"/></span><div><b>部署 {{deployment.version||''}} · {{deployment.environment}}</b><small>{{deployment.createdAt}}</small></div><StatusBadge :status="deployment.status"/></button>
+            <div v-if="!builds.length&&!deployments.length" class="deployment-empty-row">暂无构建记录 · 在 AI 全栈构建页面发起首次构建</div>
+          </div>
+        </section>
+      </div>
+      <ChangeRequestDialog v-if="showChange" @close="showChange=false"/>
+    </template>
   </div>
 </template>

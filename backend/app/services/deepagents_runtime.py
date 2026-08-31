@@ -32,6 +32,32 @@ def request_production_deployment(version: str, summary: str) -> str:
     return f"Production deployment approved: {version}; {summary}"
 
 
+def build_langgraph_checkpointer(settings: Any):
+    """PostgreSQL 部署自动切换 PostgresSaver；不可用时回退 SQLite 并给出提示。"""
+    import logging
+
+    logger = logging.getLogger("agent-platform")
+    if settings.database_url.startswith("postgresql"):
+        try:
+            import psycopg
+            from langgraph.checkpoint.postgres import PostgresSaver
+
+            dsn = settings.database_url.replace("postgresql+psycopg", "postgresql")
+            connection = psycopg.connect(dsn, autocommit=True)
+            saver = PostgresSaver(connection)
+            saver.setup()
+            logger.info("LangGraph checkpointer: PostgreSQL")
+            return saver
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("PostgreSQL checkpointer 不可用（%s），回退 SQLite", exc)
+    settings.langgraph_checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(settings.langgraph_checkpoint_db, check_same_thread=False)
+    saver = SqliteSaver(connection)
+    saver.setup()
+    logger.info("LangGraph checkpointer: SQLite（%s）", settings.langgraph_checkpoint_db)
+    return saver
+
+
 @dataclass(slots=True)
 class NativeAgentOutcome:
     status: str
@@ -41,16 +67,12 @@ class NativeAgentOutcome:
 
 class DeepAgentsRuntime:
     def __init__(self) -> None:
-        settings = get_settings()
-        settings.langgraph_checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(settings.langgraph_checkpoint_db, check_same_thread=False)
-        self.checkpointer = SqliteSaver(self.connection)
-        self.checkpointer.setup()
+        self.checkpointer = build_langgraph_checkpointer(get_settings())
         self.lock = threading.RLock()
 
-    def invoke(self, db: Session, project_id: str, build_id: str, workspace: Path, requirement: str, resume_decision: dict | None = None) -> NativeAgentOutcome:
+    def invoke(self, db: Session, project_id: str, build_id: str, workspace: Path, requirement: str, resume_decision: dict | None = None, temperature: float = 0.2) -> NativeAgentOutcome:
         settings = get_settings()
-        model = ChatOpenAI(model=settings.llm_model, api_key=settings.llm_api_key, base_url=settings.llm_base_url, temperature=0.05, timeout=settings.llm_timeout_seconds, max_retries=settings.llm_max_retries)
+        model = ChatOpenAI(model=settings.llm_model, api_key=settings.llm_api_key, base_url=settings.llm_base_url, temperature=temperature or 0.2, timeout=settings.llm_timeout_seconds, max_retries=settings.llm_max_retries)
         context = agent_runtime.build_context(db, project_id, "project-manager", requirement)
         memory_path = workspace / "AGENTS.md"
         memory_path.write_text(f"# Persistent project context\n\n{context['memory_prompt']}\n", encoding="utf-8")
@@ -102,7 +124,15 @@ class DeepAgentsRuntime:
                 for skill in item.skills or []:
                     path = root / skill
                     if path.is_dir(): skill_paths.append(str(path))
-            result.append({"name": item.name, "description": item.description, "system_prompt": item.system_prompt, "model": model, "skills": skill_paths})
+            agent_model = model
+            temperature = getattr(item, "temperature", 0.2) or 0.2
+            if abs(temperature - 0.05) > 1e-9:
+                agent_model = ChatOpenAI(
+                    model=settings.llm_model, api_key=settings.llm_api_key,
+                    base_url=settings.llm_base_url, temperature=temperature,
+                    timeout=settings.llm_timeout_seconds, max_retries=settings.llm_max_retries,
+                )
+            result.append({"name": item.name, "description": item.description, "system_prompt": item.system_prompt, "model": agent_model, "skills": skill_paths})
         return result
 
 

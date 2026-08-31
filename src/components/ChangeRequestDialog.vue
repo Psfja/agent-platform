@@ -6,10 +6,10 @@ import { api, type ImpactAnalysisResult } from '../api/client'
 import { useAppStore } from '../stores/app'
 
 const emit = defineEmits<{ close: []; submitted: [] }>()
-const app = useAppStore(); const route=useRoute(); const projectId=String(route.params.id || 'leave-hub')
+const app = useAppStore(); const route=useRoute(); const projectId=String(route.params.id || '')
 const project=computed(()=>app.projects.find(item=>item.id===projectId) || app.projects[0])
 const step = ref(1)
-const request = ref('新增假勤报表导出功能，支持按部门、日期和审批状态筛选，并导出为 Excel 文件。导出数据量较大时需要显示处理进度。')
+const request = ref('')
 const analyzing = ref(false); const confirmed = ref(false); const analysis=ref<ImpactAnalysisResult | null>(null)
 const canAnalyze = computed(() => request.value.trim().length >= 20)
 const riskLabel=computed(()=>analysis.value?.riskLevel==='high'?'高':analysis.value?.riskLevel==='medium'?'中':'低')

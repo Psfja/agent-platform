@@ -21,6 +21,7 @@
 - [主要 API](#主要-api)
 - [测试与验证](#测试与验证)
 - [演示账号](#演示账号)
+- [改进路线](#改进路线)
 - [当前边界](#当前边界)
 
 ---
@@ -59,7 +60,8 @@
 - Skill Manifest、输入 Schema 和 SHA-256 校验
 - Skill 热重载
 - Skill 代码只在沙箱执行，不导入 API 进程
-- 内置需求分析、代码度量、回归测试计划 Skills
+- 内置需求分析、代码度量、回归测试计划、前端设计审计与优化 Skills
+  （ui-redesign 基于 taste-skill 的 redesign 技能适配，MIT 协议署名）
 
 ### 真实代码生成与质量门禁
 
@@ -95,10 +97,11 @@
 - PBKDF2-SHA256 密码哈希
 - JWT Access Token
 - Refresh Token 持久化、轮换和撤销
-- 通用 OIDC Discovery、JWKS 和授权码回调
+- 通用 OIDC Discovery、JWKS 和授权码回调（前端 `/login/callback` 完整闭环）
 - LDAP 搜索和密码绑定
 - SSO 用户自动预配
 - 超级管理员、平台管理员、普通用户
+- 平台用户管理 API：列表、创建（自动生成初始密码）、角色变更、启停、密码重置和删除保护
 - Owner、Co-manager、Member、Viewer 项目 RBAC
 - 项目列表和项目 API 数据隔离
 - 登录、成员及关键操作审计
@@ -139,17 +142,45 @@
 
 ### 平台配置与外部集成
 
-- AgentType CRUD、Prompt、Model、Tools、Skills、Sandbox
-- AgentType 配置版本历史和使用中删除保护
+- AgentType CRUD、Prompt、Model、Tools、Skills、Sandbox 与真实 Temperature（0–1，实际作用于对话/Agent 调用）
+- AgentType 配置版本历史、引用统计（被哪些流程模板引用）与使用中删除保护（无引用可直接删除）
 - PipelineTemplate 与 PipelineNode CRUD
 - 节点依赖、顺序/并行模式和引用校验
 - 系统预置三套流程和需求关键词推荐
+- AI 流程生成：自然语言描述需求 → 模型网关生成流程草稿（引用真实 AgentType，自动清洗非法标识/无效引用/环依赖，无 Key 时明确报错不 Mock）
+- 流程图编排：SVG 流程图可视化；拖拽节点调整位置；从节点右侧把手拖到另一节点左侧把手建立依赖；点击连线删除；节点增删与自动布局；依赖面板勾选编辑；画布坐标随模板持久化
+- 平台用户管理：创建（一次性初始密码）、角色变更、启停、密码重置；删除时可将名下项目一键移交当前管理员
+- 智能体对话：每个智能体均有独立会话（按项目），支持长期记忆、上下文管理与多轮对话
+- 对话上下文：Agent 人设 + 按相关性召回的持久记忆 + 装配的 Skills 指令 + 历史消息（Token 预算自动裁剪旧消息）
+- 对话长期记忆：每轮对话自动提取值得记住的事实写入 Episodic 记忆（可开关），下次对话自动召回
+- 记忆语义召回：配置 embedding 模型后按 关键词×0.5 + 余弦相似度×0.5 混合重排，不可用时自动降级关键词排序
+- SSE 流式回复：逐 Token 打字机输出（fetch + ReadableStream 解析），提供方不支持 stream 时自动降级
+- AI 会话标题：首条回复后自动生成标题，可随时点击魔法按钮基于最近消息重新生成
+- 对话工具模式（DeepAgents）：每个对话可切换为真实智能体——项目专属文件工作区（FilesystemBackend）、
+  Python 沙箱工具、TodoList、平台子智能体委派（task tool）、Skills 与长期记忆注入、生产部署 HITL
+  中断（流式事件触发审批卡片，批准/编辑/驳回后从检查点恢复继续执行）
 - Git Init、Branch、Commit 和可配置 Push
 - MinIO 上传与本地文件降级
 - 站内通知、SMTP 和 Webhook
 - psutil 主机监控
 - Prometheus `/metrics`
 - 项目、任务、Agent Build、Deployment、Queue、Token 指标
+- 管理后台（智能体/流程/用户/设置/资源）全部接入真实 API
+- 前端设计体系：按 ui-redesign 审计 18/18 通过——z-index 令牌、tabular-nums 数字排版、
+  按压反馈与减动效、骨架屏、品牌 favicon、OG meta、100dvh 布局、死链清零
+
+### 平台自身容器化部署
+
+- FastAPI/Worker 单镜像（`backend/docker/platform-api.Dockerfile`，非 root 运行）
+- Vue + Nginx 前端镜像（`docker/frontend.Dockerfile`，SPA 回退、`/api` `/health` 反向代理、SSE 关闭缓冲、前端探活 `/healthz`）
+- `docker-compose.production.yml`：PostgreSQL + Redis + API + Worker + 前端一体化编排，含健康检查、重启策略、数据卷与可选 MinIO（`--profile storage`）
+- 根目录 `.env.docker.example` 提供全部部署环境变量模板
+
+### 持续集成
+
+- `.github/workflows/ci.yml`：push 与 PR 自动执行
+  - 后端：Python 3.11 + pytest + Alembic 单 head 校验
+  - 前端：npm ci + Vitest 单元测试 + vue-tsc + Vite 生产构建 + npm audit
 
 ---
 
@@ -226,6 +257,12 @@
 
 ```text
 agent-platform/
+├── .github/workflows/ci.yml        # CI：后端 pytest + Alembic，前端 Vitest + 构建 + audit
+├── docker/
+│   ├── frontend.Dockerfile         # 平台前端镜像（Vue 构建 + Nginx）
+│   └── nginx.conf                  # SPA 回退与 /api、/health 反向代理
+├── docker-compose.production.yml   # 平台本体生产编排（PostgreSQL/Redis/API/Worker/前端/MinIO）
+├── .env.docker.example             # Compose 环境变量模板
 ├── src/
 │   ├── api/client.ts
 │   ├── components/
@@ -233,21 +270,25 @@ agent-platform/
 │   ├── pages/
 │   │   ├── AgentBuildPage.vue
 │   │   ├── AgentRuntimePage.vue
+│   │   ├── LoginCallbackPage.vue   # 企业 OIDC 授权码回调
 │   │   └── admin/
 │   │       ├── AgentTypesPage.vue
 │   │       ├── AgentTypeEditPage.vue
 │   │       ├── SkillsPage.vue
 │   │       ├── PipelineTemplatesPage.vue
 │   │       ├── ResourcesPage.vue
-│   │       └── SettingsPage.vue
+│   │       ├── SettingsPage.vue
+│   │       └── UsersPage.vue
 │   ├── stores/
 │   ├── router.ts
 │   ├── styles.css
-│   └── additional.css
+│   ├── additional.css
+│   └── **/*.test.ts                # 前端 Vitest 单元测试（38 个）
 ├── backend/
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── auth.py
+│   │   │   ├── admin_users.py      # 平台用户管理
 │   │   │   ├── projects.py
 │   │   │   ├── content.py
 │   │   │   ├── tasks.py
@@ -275,13 +316,15 @@ agent-platform/
 │   │   └── worker.py
 │   ├── skills/
 │   ├── docker/
+│   │   ├── platform-api.Dockerfile # 平台 API/Worker 镜像
+│   │   └── agent-build.Dockerfile  # 生成应用构建镜像
 │   ├── tests/
 │   ├── alembic.ini
 │   ├── docker-compose.infrastructure.yml
 │   ├── requirements.txt
 │   └── .env.example
 ├── package.json
-├── vite.config.ts
+├── vite.config.ts                  # 含 Vitest 配置
 └── README.md
 ```
 
@@ -295,6 +338,7 @@ agent-platform/
 - npm 10+
 - Python 3.11+
 - Docker 与 Docker Compose，可选但推荐
+- 操作系统：Linux / macOS / Windows 10/11（Windows 完整步骤见下方「Windows 快速开始」）
 
 ### 1. 安装前端依赖
 
@@ -358,6 +402,84 @@ npm run dev -- --host 0.0.0.0
 - 健康检查：`http://localhost:8000/health`
 - Prometheus：`http://localhost:8000/metrics`
 
+### Windows 快速开始（PowerShell）
+
+> 建议使用 Windows 10/11 + PowerShell 7。若 `python` 不可用请从 Microsoft Store 或 python.org 安装，并在安装时勾选「Add python.exe to PATH」；Node.js 安装后同样需在 PATH 中。
+
+**1. 前端依赖**
+
+```powershell
+npm install
+```
+
+**2. 后端依赖与配置**
+
+```powershell
+cd backend
+python -m venv .venv
+.venv\Scripts\Activate.ps1          # 若提示禁止运行脚本，先执行：
+# Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+pip install -r requirements-dev.txt
+Copy-Item .env.example .env
+```
+
+> 若仍无法激活虚拟环境，可用不带激活的方式：直接使用 `.venv\Scripts\python.exe` 替代下文所有 `python`。
+
+**3. 基础设施（可选）**
+
+```powershell
+# 安装并启动 Docker Desktop 后执行：
+docker compose -f docker-compose.infrastructure.yml up -d
+```
+
+不启动也无需安装 Docker：开发环境自动降级为 SQLite + 本地文件 + 线程队列。
+
+**4. 启动 API（开两个终端分别运行）**
+
+```powershell
+cd backend
+.venv\Scripts\python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**5. 启动前端（另一个终端）**
+
+```powershell
+cd agent-platform                    # 回到仓库根目录
+npm run dev -- --host 0.0.0.0
+```
+
+**6. Redis Worker（可选）**
+
+```powershell
+cd backend
+.venv\Scripts\python -m app.worker
+```
+
+**访问地址与 Linux 一致**：前端 `http://localhost:4173`、Swagger `http://localhost:8000/docs`、健康检查 `http://localhost:8000/health`。
+
+**Windows 常见问题**
+
+- `npm install` 依赖安装失败：以管理员身份打开 PowerShell 后重试，或使用 `npm config set msvs_version` 指定构建工具（本项目依赖均为纯 JS/Python，通常不会遇到）。
+- 端口被占用（8000 / 4173）：`Get-NetTCPConnection -LocalPort 8000` 找到占用进程后 `Stop-Process -Id <PID>`。
+- 路径含空格/中文导致 Python 找不到模块：请使用纯英文路径克隆仓库（例如 `C:\dev\agent-platform`）。
+- 生产部署（Docker 双镜像、容器部署生成应用）在 Windows 上使用 Docker Desktop（WSL2 后端）即可，与 Linux 命令一致。
+
+### 7. （可选）Docker 一键部署平台本体
+
+```bash
+cp .env.docker.example .env    # 修改 JWT_SECRET 等
+docker compose -f docker-compose.production.yml up -d --build
+# 可选对象存储：
+docker compose -f docker-compose.production.yml --profile storage up -d
+```
+
+将构建平台 API/Worker 镜像与 Vue+Nginx 前端镜像，并启动 PostgreSQL、Redis。访问：
+
+- 前端（经 Nginx）：`http://localhost:8080`
+- Swagger：`http://localhost:8000/docs`
+
+详见 `docker-compose.production.yml` 头部说明（`docker.sock` 挂载与沙箱配置注意事项）。
+
 ---
 
 ## 环境配置
@@ -401,6 +523,16 @@ QUEUE_FALLBACK_THREADS=true
 ```
 
 生产环境建议设置 `QUEUE_FALLBACK_THREADS=false` 并独立运行 Worker。
+
+### 对话与上下文
+
+```env
+CONVERSATION_CONTEXT_TOKENS=6000
+CONVERSATION_HISTORY_MIN_MESSAGES=12
+EMBEDDING_MODEL=           # 留空则沿用 LLM_MODEL；不支持 embedding 的网关自动降级关键词召回
+```
+
+每轮对话召回长期记忆并裁剪超出 Token 预算的早期消息；未配置 `LLM_API_KEY` 时对话返回明确的 `503 LLM_NOT_CONFIGURED`。
 
 ### 沙箱与部署
 
@@ -648,6 +780,18 @@ GET  /api/v1/queue/migrations
 ```text
 GET/POST/PATCH/DELETE /api/v1/admin/agent-types
 GET/POST/PUT          /api/v1/admin/pipeline-templates
+POST                  /api/v1/admin/pipeline-templates/generate
+POST                  /api/v1/admin/pipeline-templates/recommend
+GET/POST/PATCH/DELETE /api/v1/admin/users
+GET/POST               /api/v1/projects/{id}/conversations
+GET/PATCH/DELETE       /api/v1/projects/{id}/conversations/{conversationId}
+POST                   /api/v1/projects/{id}/conversations/{conversationId}/messages
+POST                   /api/v1/projects/{id}/conversations/{conversationId}/messages/stream   # SSE
+POST                   /api/v1/projects/{id}/conversations/{conversationId}/title
+GET                    /api/v1/projects/{id}/conversations/{conversationId}/interrupts
+POST                   /api/v1/projects/{id}/conversations/{conversationId}/interrupts/{interruptId}/decide
+GET                    /api/v1/projects/{id}/conversations/{conversationId}/workspace
+GET                    /api/v1/settings/status
 GET                    /api/v1/queue/status
 GET                    /api/v1/queue/jobs
 GET                    /api/v1/monitoring/summary
@@ -663,24 +807,34 @@ GET                    /metrics
 ## 测试与验证
 
 ```bash
-npm run build
+npm run test                        # 前端单元测试（Vitest + Vue Test Utils）
+npm run build                       # vue-tsc 类型检查 + Vite 生产构建
 npm audit --audit-level=moderate
 
 cd backend
-.venv/bin/pytest
+.venv/bin/pytest                    # 后端集成测试
+.venv/bin/python -m alembic heads   # 迁移单 head 校验
 ```
+
+`.github/workflows/ci.yml`（pytest/Alembic + Vitest/构建/audit 流水线）已随仓库准备好；由于当前推送使用的 GitHub App 令牌缺少 workflows 权限，该文件尚未进入远程分支，请用具备权限的账号提交一次即可启用自动检查。
 
 当前结果：
 
-- 后端集成测试：`21 passed`
+- 后端集成测试：`33 passed`
+- 前端单元测试：`64 passed`（API 客户端、路由守卫、OIDC 回调、管理页、流程图、对话面板/工具模式/审批、删除与移交流程）
+- 前端设计审计：`ui-redesign` Skill 18/18 项通过
+- Playwright E2E：登录导航、项目工作区、流程编排 3 组用例（`scripts/e2e.sh`；登录/导航类用例无需模型 Key，需可下载 Chromium 的网络环境）
+- 安全与验收脚手架：`scripts/security.sh`（Semgrep/Trivy/Syft）、`locustfile.py` 并发压测
 - TypeScript 检查：通过
 - Vite Production Build：通过
 - npm audit：`0 vulnerabilities`
-- Alembic：`0003_content_integrations`，与 Head 一致
+- Alembic：`0006_agent_type_temperature`，与 Head 一致
 
 集成测试覆盖：
 
+- 智能体对话：会话 CRUD、上下文组装（记忆+Skills+历史）、Token 预算裁剪、记忆自动提取与未配置模型 503
 - JWT、Refresh Token、RBAC 和项目隔离
+- 平台用户管理（创建/角色/启停/密码重置/删除保护）与系统设置状态脱敏
 - AgentType 与 PipelineTemplate
 - 记忆、Skills 和沙箱
 - 初始/增量代码生成
@@ -724,19 +878,51 @@ Agent@2026
 
 ---
 
+## 改进路线
+
+按优先级排列的后续计划；标注「免 Key」的项不依赖模型/外部服务即可实施。
+
+### P0 · 真实模型端到端验证
+
+- 配置 `LLM_API_KEY` 后跑通首次真实 DeepAgents Build（规划→生成→pytest-cov≥80%→Vitest→Vite build→修复闭环），按真实模型行为调优 Prompt 与门禁
+- 真实跑通智能体对话（聊天模式 + 工具模式：写文件/沙箱/HITL 审批）与 AI 流程生成
+
+### P1 · 即将完成
+
+- CI 工作流入库（文件已就绪，等具备 workflows 权限的账号推送）
+- 对话记忆语义向量召回在真实网关上的联调（当前降级关键词+重要度排序，功能可用）
+
+### P2 · 生产级加固
+
+- Playwright E2E 实跑、SAST/镜像扫描/SBOM 接入 CI、大规模并发验收
+- 固定域名、HTTPS 与蓝绿流量代理（含 Nginx TLS 模板）
+- 多节点部署下的并发锁与队列水平扩展验证
+- 审计日志可视化（管理后台）
+
+### P3 · 企业重复性工作方向（底座已具备，需执行层）
+
+- 通用 `agent_task` 执行链路：提交任务 → 选 Agent/Skill → 沙箱执行 → 结果/审批/通知（复用对话工具模式与流程编排）
+- 文档处理 Skills：Excel/PDF 字段抽取、清洗比对、报表生成
+- 定时/触发调度：cron、Webhook 触发重复任务
+- 企业连接器：IMAP 邮箱、企微/钉钉机器人、数据库只读适配器
+- 业务任务模板库：常见重复工作沉淀为一键复用模板
+
+---
+
 ## 当前边界
 
 已实现核心能力，但以下内容仍需部署环境或后续增强：
 
-- 真实模型 Key 未配置时不能运行 DeepAgents Build
-- 当前预览环境未提供 Redis、MinIO、PostgreSQL、Docker daemon 和 Git Remote
+- 真实模型 Key 未配置时不能运行 DeepAgents Build 与智能体对话/流程生成（接口会明确返回 503，绝不 Mock）
+- 尚未进行真实模型的端到端首跑验证（当前全部验证基于脚本化模型与真实质量门禁）
+- CI 工作流文件已准备好，但需具备 workflows 权限的账号推送入库后才会自动执行
+- Playwright E2E 用例与一键脚本已就绪，需可下载 Chromium 的网络环境实跑
+- SAST（Semgrep）、镜像扫描（Trivy）、SBOM（Syft）与并发压测（Locust）脚手架已提供，实跑需对应工具与 Docker daemon
 - 企业微信专用 OAuth 与钉钉专用消息格式尚未单独封装
 - Docker 部署使用动态端口，尚未接入固定域名、HTTPS 和蓝绿流量代理
 - 本地进程沙箱不提供可靠网络/文件系统边界，生产必须使用 Docker Sandbox
-- DeepAgents 原生 Checkpointer 当前使用 SQLite；多节点生产可切换 PostgreSQL Checkpointer
 - 生成应用 PostgreSQL 回滚依赖部署机器安装 `pg_dump` 和 `pg_restore`
-- 前端部分资源图表仍保留演示数据，后端真实监控 API 已可用
-- 仍需补充 Playwright E2E、SAST、镜像扫描、SBOM 和大规模并发验收
+- 平台 Docker 镜像与 `docker-compose.production.yml` 已在无 Docker 环境做静态校验，首次使用时请在具备 Docker daemon 的机器上完成镜像构建验证
 
 ---
 

@@ -76,6 +76,60 @@ function mapIteration(item: ApiIteration): Iteration { return { ...item, date: n
 export interface AuthUser { id: string; email: string; displayName: string; platformRole: string; department: string; isActive: boolean; authSource: string; lastLoginAt: string | null }
 export interface AuthTokenResponse { accessToken: string; refreshToken: string; tokenType: string; expiresIn: number; user: AuthUser }
 export interface ProjectMemberRecord { id: string; userId: string; email: string; displayName: string; department: string; role: string; status: string; joinedAt: string }
+export interface AgentTypeRecord { id: string; name: string; displayName: string; description: string; systemPrompt: string; model: string; temperature: number; tools: string[]; skills: string[]; sandboxConfig: Record<string, any>; version: number; isTemplate: boolean; isActive: boolean; usage: { pipelineNodes: number; templateNames: string[]; activeTasks: number }; createdAt: string; updatedAt: string }
+export interface PipelineNodeRecord { nodeKey: string; agentTypeId: string; displayName: string; dependsOn: string[]; executionMode: 'sequential' | 'parallel'; config: Record<string, unknown>; position: number }
+export interface PipelineTemplateRecord { id: string; name: string; displayName: string; description: string; templateType: string; version: number; isActive: boolean; isSystem: boolean; config: Record<string, unknown>; nodes: PipelineNodeRecord[]; createdAt: string; updatedAt: string }
+export interface PipelineDraftRecord { name: string; displayName: string; description: string; templateType: string; nodes: PipelineNodeRecord[] }
+export interface AdminUserRecord { id: string; email: string; displayName: string; department: string; platformRole: string; isActive: boolean; authSource: string; lastLoginAt: string | null; createdAt: string; projectCount: number; ownedProjects: number }
+export interface MonitoringSummary {
+  system: { cpuPercent: number; memoryPercent: number; diskPercent: number; loadAverage: number[] }
+  projects: { total: number; active: number }
+  tasks: { running: number; failed: number }
+  agentBuilds: { completed: number; failed: number; tokens: number }
+  deployments: { running: number; failed: number }
+  queue: { redisAvailable: boolean; queueName: string; fallbackThreads: boolean; counts: Record<string, number> }
+  storage: { provider: string; configured: boolean }
+}
+export interface IntegrationsStatus {
+  git: { configured: boolean; remote: string }
+  minio: { configured: boolean; endpoint: string; bucket: string }
+  smtp: { configured: boolean; host: string }
+  webhook: { configured: boolean }
+}
+export interface SettingsStatus {
+  platform: { name: string; environment: string; debug: boolean }
+  database: { engine: string; migrationsEnabled: boolean }
+  llm: { configured: boolean; baseUrl: string; model: string; engine: string; timeoutSeconds: number; maxRetries: number }
+  sandbox: { configuredBackend: string; activeBackend: string; available: boolean; isolation: string; dockerAvailable: boolean; limits: Record<string, number | string>; warnings: string[] }
+  queue: { redisAvailable: boolean; queueName: string; fallbackThreads: boolean; counts: Record<string, number> }
+  sso: { oidc: { configured: boolean; issuer: string; clientId: string }; ldap: { configured: boolean; url: string; baseDn: string } }
+  security: { jwtAlgorithm: string; accessTokenMinutes: number; refreshTokenDays: number }
+  storage: { minio: { configured: boolean; endpoint: string; bucket: string; secure: boolean } }
+  git: { configured: boolean; remote: string; defaultBranch: string }
+  notifications: { smtp: { configured: boolean; host: string; port: number; username: string }; webhook: { configured: boolean } }
+  deployment: { publicHost: string; generatedDatabaseConfigured: boolean }
+  generatedAt: string
+}
+export interface ConversationRecord { id: string; projectId: string; agentKey: string; mode: string; title: string; createdAt: string; updatedAt: string; lastMessageAt: string | null; messageCount: number }
+export interface ConversationMessageRecord { id: string; role: 'user' | 'assistant'; content: string; metadata: Record<string, any>; createdAt: string }
+export interface ConversationDetailRecord extends ConversationRecord { messages: ConversationMessageRecord[] }
+export interface ChatTurnRecord {
+  conversation: ConversationRecord
+  userMessage: ConversationMessageRecord
+  assistantMessage: ConversationMessageRecord
+  memoriesUsed: MemoryRecord[]
+  context: { historyMessages: number; droppedMessages: number; estimatedTokens: number; budgetTokens: number; memoriesRecalled: number; skillsLoaded: number }
+}
+export interface StreamDoneRecord {
+  conversation: ConversationRecord
+  assistantMessage?: ConversationMessageRecord | null
+  memoriesUsed: MemoryRecord[]
+  userMessageId?: string
+  title?: string | null
+  interrupt?: { toolName: string; payload: Record<string, any> } | null
+}
+export interface ConversationInterruptRecord { id: string; conversationId: string; toolName: string; payload: Record<string, any>; status: string; createdAt: string }
+
 export interface RequirementRecord { id:string;projectId:string;version:number;title:string;contentMarkdown:string;structuredData:Record<string,any>;status:string;changeSummary:string;createdBy:string|null;createdAt:string }
 export interface DocumentRecord { id:string;projectId:string;documentType:string;version:number;title:string;contentMarkdown:string;sourceBuildId:string|null;metadata:Record<string,any>;createdBy:string|null;createdAt:string;updatedAt:string }
 
@@ -114,7 +168,7 @@ export interface SandboxRunRecord { id: string; projectId: string; taskId: strin
 export interface AgentContextRecord { projectId: string; agentKey: string; memories: MemoryRecord[]; skills: SkillRecord[]; memoryPrompt: string; skillPrompt: string; sandbox: SandboxStatus }
 export interface LLMBuildStatus { configured: boolean; provider: string; baseUrl: string; model: string; timeoutSeconds: number; supportsRealExecution: boolean; message: string; agentEngine:string; nativeDeepagents:boolean }
 export interface AgentBuildLog { id: string; stage: string; level: string; agentKey: string | null; message: string; metadata: Record<string, unknown>; createdAt: string }
-export interface AgentBuildRecord { id: string; projectId: string; iterationId: string | null; requirement: string; template: string; mode: 'initial' | 'incremental'; baseBuildId: string | null; model: string; status: string; currentStage: string; progress: number; plan: Record<string, any>; generatedFiles: { path: string; size: number; sha256?: string }[]; changedFilesCount: number; coverage: number | null; testResults: { name: string; command: string[]; passed: boolean; status: string; exitCode: number | null; stdout: string; stderr: string; elapsedMs: number; attempt: number; coverage?: number }[]; attempt: number; maxFixAttempts: number; promptTokens: number; completionTokens: number; workspacePath: string; artifactPath: string; errorMessage: string; cancellationRequested: boolean; startedAt: string | null; finishedAt: string | null; createdAt: string; updatedAt: string; logs: AgentBuildLog[] }
+export interface AgentBuildRecord { id: string; projectId: string; iterationId: string | null; requirement: string; template: string; mode: 'initial' | 'incremental'; baseBuildId: string | null; model: string; temperature: number; status: string; currentStage: string; progress: number; plan: Record<string, any>; generatedFiles: { path: string; size: number; sha256?: string }[]; changedFilesCount: number; coverage: number | null; testResults: { name: string; command: string[]; passed: boolean; status: string; exitCode: number | null; stdout: string; stderr: string; elapsedMs: number; attempt: number; coverage?: number }[]; attempt: number; maxFixAttempts: number; promptTokens: number; completionTokens: number; workspacePath: string; artifactPath: string; errorMessage: string; cancellationRequested: boolean; startedAt: string | null; finishedAt: string | null; createdAt: string; updatedAt: string; logs: AgentBuildLog[] }
 export interface AgentBuildFile { path: string; size: number; content?: string | null }
 export interface DeploymentRuntimeStatus { dockerAvailable: boolean; dockerVersion: string; ready: boolean; message: string; runningDeployments: number }
 export interface DeploymentRuntimeLog { id: string; stage: string; level: string; message: string; metadata: Record<string, unknown>; createdAt: string }
@@ -129,6 +183,11 @@ export const api = {
   me(): Promise<AuthUser> { return request('/auth/me') },
   ssoStatus(): Promise<{oidcConfigured:boolean;ldapConfigured:boolean;providers:string[]}> { return request('/auth/sso/status', {}, false) },
   oidcStart(): Promise<{authorizationUrl:string;state:string}> { return request('/auth/sso/oidc/start', {}, false) },
+  async oidcCallback(code: string, state: string): Promise<AuthTokenResponse> {
+    const result = await request<AuthTokenResponse>('/auth/sso/oidc/callback', { method: 'POST', body: JSON.stringify({ code, state }) }, false)
+    authTokens.set(result.accessToken, result.refreshToken)
+    return result
+  },
   async ldapLogin(username:string,password:string): Promise<AuthTokenResponse> { const result=await request<AuthTokenResponse>('/auth/sso/ldap',{method:'POST',body:JSON.stringify({username,password})},false);authTokens.set(result.accessToken,result.refreshToken);return result },
   async logout(): Promise<void> {
     const refreshToken = authTokens.refresh()
@@ -167,6 +226,7 @@ export const api = {
     return request(`/projects/${projectId}/tasks/${taskId}/interventions`, { method: 'POST', body: JSON.stringify({ content, interventionType }) })
   },
   async iterations(projectId: string): Promise<Iteration[]> { return (await request<ApiIteration[]>(`/projects/${projectId}/iterations`)).map(mapIteration) },
+  async iteration(projectId: string, iterationId: string): Promise<Iteration> { return mapIteration(await request<ApiIteration>(`/projects/${projectId}/iterations/${iterationId}`)) },
   analyze(projectId: string, changeRequest: string): Promise<ImpactAnalysisResult> {
     return request(`/projects/${projectId}/iterations/impact-analysis`, { method: 'POST', body: JSON.stringify({ changeRequest }) })
   },
@@ -197,6 +257,24 @@ export const api = {
     return request(`/projects/${projectId}/memories`, { method: 'POST', body: JSON.stringify(payload) })
   },
   deleteMemory(projectId: string, memoryId: string): Promise<void> { return request(`/projects/${projectId}/memories/${memoryId}`, { method: 'DELETE' }) },
+  agentTypes(): Promise<AgentTypeRecord[]> { return request('/admin/agent-types') },
+  agentType(id: string): Promise<AgentTypeRecord> { return request(`/admin/agent-types/${id}`) },
+  createAgentType(payload: { name: string; displayName: string; description: string; systemPrompt: string; model: string; temperature: number; tools: string[]; skills: string[]; sandboxConfig: Record<string, any>; isActive: boolean }): Promise<AgentTypeRecord> { return request('/admin/agent-types', { method: 'POST', body: JSON.stringify(payload) }) },
+  updateAgentType(id: string, payload: Partial<{ displayName: string; description: string; systemPrompt: string; model: string; temperature: number; tools: string[]; skills: string[]; sandboxConfig: Record<string, any>; isActive: boolean }>): Promise<AgentTypeRecord> { return request(`/admin/agent-types/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }) },
+  deleteAgentType(id: string): Promise<void> { return request(`/admin/agent-types/${id}`, { method: 'DELETE' }) },
+  pipelineTemplates(): Promise<PipelineTemplateRecord[]> { return request('/admin/pipeline-templates') },
+  createPipelineTemplate(payload: { name: string; displayName: string; description: string; templateType: 'fullstack' | 'api' | 'frontend' | 'custom'; isActive: boolean; nodes: PipelineNodeRecord[] }): Promise<PipelineTemplateRecord> { return request('/admin/pipeline-templates', { method: 'POST', body: JSON.stringify(payload) }) },
+  updatePipelineTemplate(id: string, payload: { displayName: string; description: string; templateType: 'fullstack' | 'api' | 'frontend' | 'custom'; isActive: boolean; nodes: PipelineNodeRecord[] }): Promise<PipelineTemplateRecord> { return request(`/admin/pipeline-templates/${id}`, { method: 'PUT', body: JSON.stringify(payload) }) },
+  generatePipeline(requirement: string): Promise<{ draft: PipelineDraftRecord; warnings: string[] }> { return request('/admin/pipeline-templates/generate', { method: 'POST', body: JSON.stringify({ requirement }) }) },
+  adminUsers(): Promise<AdminUserRecord[]> { return request('/admin/users') },
+  createAdminUser(payload: { email: string; displayName: string; department: string; platformRole: string; initialPassword?: string }): Promise<{ user: AdminUserRecord; tempPassword: string | null }> { return request('/admin/users', { method: 'POST', body: JSON.stringify(payload) }) },
+  updateAdminUser(id: string, payload: Partial<{ displayName: string; department: string; platformRole: string; isActive: boolean; newPassword: string }>): Promise<AdminUserRecord> { return request(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }) },
+  deleteAdminUser(id: string, reassign = false): Promise<void> { return request(`/admin/users/${id}`, { method: 'DELETE', body: JSON.stringify({ reassign }) }) },
+  monitoringSummary(): Promise<MonitoringSummary> { return request('/monitoring/summary') },
+  integrationsStatus(): Promise<IntegrationsStatus> { return request('/integrations/status') },
+  settingsStatus(): Promise<SettingsStatus> { return request('/settings/status') },
+  notifications(): Promise<{ id: string; eventType: string; title: string; content: string; status: string; readAt: string | null; createdAt: string }[]> { return request('/notifications') },
+  readNotification(id: string): Promise<{ ok: boolean }> { return request(`/notifications/${id}/read`, { method: 'POST' }) },
   sandboxStatus(): Promise<SandboxStatus> { return request('/sandbox/status') },
   sandboxRuns(projectId: string): Promise<SandboxRunRecord[]> { return request(`/projects/${projectId}/sandbox/runs`) },
   runSandbox(projectId: string, code: string, stdin = '', timeoutSeconds = 30): Promise<SandboxRunRecord> {
@@ -210,7 +288,7 @@ export const api = {
   },
   agentBuildStatus(): Promise<LLMBuildStatus> { return request('/agent-build/status') },
   agentBuilds(projectId: string): Promise<AgentBuildRecord[]> { return request(`/projects/${projectId}/agent-builds`) },
-  createAgentBuild(projectId: string, payload: { requirement: string; template: 'fullstack'; mode?: 'initial' | 'incremental'; baseBuildId?: string; autoDeploy?: boolean; deployEnvironment?: 'test' | 'production'; model?: string; maxFixAttempts: number; iterationId?: string }): Promise<AgentBuildRecord> {
+  createAgentBuild(projectId: string, payload: { requirement: string; template: 'fullstack'; mode?: 'initial' | 'incremental'; baseBuildId?: string; autoDeploy?: boolean; deployEnvironment?: 'test' | 'production'; model?: string; maxFixAttempts: number; temperature?: number; iterationId?: string }): Promise<AgentBuildRecord> {
     return request(`/projects/${projectId}/agent-builds`, { method: 'POST', body: JSON.stringify(payload) })
   },
   agentBuild(projectId: string, buildId: string): Promise<AgentBuildRecord> { return request(`/projects/${projectId}/agent-builds/${buildId}`) },
@@ -230,6 +308,94 @@ export const api = {
   deploymentContainerLogs(projectId: string, deploymentId: string): Promise<{backend:string;frontend:string}> { return request(`/projects/${projectId}/application-deployments/${deploymentId}/container-logs`) },
   queueStatus(): Promise<{redisAvailable:boolean;redisUrl:string;queueName:string;fallbackThreads:boolean;counts:Record<string,number>}> { return request('/queue/status') },
   migrationStatus(): Promise<{currentRevision:string|null;headRevision:string|null;upToDate:boolean;enabled:boolean}> { return request('/queue/migrations') },
+  conversations(projectId: string, agentKey?: string): Promise<ConversationRecord[]> {
+    return request(`/projects/${projectId}/conversations${agentKey ? `?agent_key=${encodeURIComponent(agentKey)}` : ''}`)
+  },
+  createConversation(projectId: string, agentKey: string, title = ''): Promise<ConversationRecord> { return request(`/projects/${projectId}/conversations`, { method: 'POST', body: JSON.stringify({ agentKey, title }) }) },
+  conversation(projectId: string, conversationId: string): Promise<ConversationDetailRecord> { return request(`/projects/${projectId}/conversations/${conversationId}`) },
+  renameConversation(projectId: string, conversationId: string, title: string): Promise<ConversationRecord> { return request(`/projects/${projectId}/conversations/${conversationId}`, { method: 'PATCH', body: JSON.stringify({ title }) }) },
+  deleteConversation(projectId: string, conversationId: string): Promise<void> { return request(`/projects/${projectId}/conversations/${conversationId}`, { method: 'DELETE' }) },
+  sendConversationMessage(projectId: string, conversationId: string, content: string, remember = true): Promise<ChatTurnRecord> { return request(`/projects/${projectId}/conversations/${conversationId}/messages`, { method: 'POST', body: JSON.stringify({ content, remember }) }) },
+  async streamConversationMessage(
+    projectId: string,
+    conversationId: string,
+    content: string,
+    remember: boolean,
+    handlers: {
+      onMeta?: (context: Record<string, number | string>) => void
+      onDelta?: (chunk: string) => void
+      onTitle?: (title: string) => void
+      onInterrupt?: (interrupt: { interruptId?: string; toolName: string; payload: Record<string, any> }) => void
+    } = {},
+  ): Promise<StreamDoneRecord> {
+    const doFetch = (token: string) => fetch(`${API_BASE}/projects/${projectId}/conversations/${conversationId}/messages/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ content, remember }),
+    })
+    let response = await doFetch(authTokens.access())
+    if (response.status === 401) {
+      const refreshToken = authTokens.refresh()
+      if (refreshToken) {
+        const refreshed = await fetch(`${API_BASE}/auth/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }) })
+        if (refreshed.ok) {
+          const payload = await refreshed.json()
+          authTokens.set(payload.accessToken, payload.refreshToken)
+          response = await doFetch(payload.accessToken)
+        }
+      }
+      if (response.status === 401) {
+        authTokens.clear()
+        window.location.assign('/login')
+        throw new ApiError(401, 'AUTH_REQUIRED', '登录已过期')
+      }
+    }
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      const error = payload.error || payload.detail || {}
+      throw new ApiError(response.status, error.code || 'HTTP_ERROR', error.message || `请求失败 (${response.status})`, error.details || {})
+    }
+    if (!response.body) throw new Error('当前浏览器不支持流式响应')
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let done: StreamDoneRecord | null = null
+    const handleEvent = (raw: string) => {
+      const dataLine = raw.split('\n').find(line => line.startsWith('data:'))
+      if (!dataLine) return
+      const parsed = JSON.parse(dataLine.slice(5).trim()) as { type: string; [key: string]: any }
+      if (parsed.type === 'meta') handlers.onMeta?.(parsed.context)
+      else if (parsed.type === 'delta') handlers.onDelta?.(parsed.content || '')
+      else if (parsed.type === 'title') handlers.onTitle?.(parsed.title)
+      else if (parsed.type === 'interrupt') handlers.onInterrupt?.({ interruptId: parsed.interruptId, toolName: parsed.toolName, payload: parsed.payload })
+      else if (parsed.type === 'done') done = parsed as unknown as StreamDoneRecord
+      else if (parsed.type === 'error') throw new ApiError(parsed.status || 502, parsed.code || 'STREAM_ERROR', parsed.message || '流式对话失败')
+    }
+    try {
+      while (true) {
+        const { value, done: finished } = await reader.read()
+        if (finished) break
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() || ''
+        for (const part of parts) {
+          const trimmed = part.trim()
+          if (trimmed) handleEvent(trimmed)
+        }
+      }
+      buffer += decoder.decode()
+      if (buffer.trim()) handleEvent(buffer.trim())
+    } finally {
+      reader.releaseLock()
+    }
+    if (!done) throw new ApiError(502, 'STREAM_INCOMPLETE', '流式响应未完成')
+    return done
+  },
+  regenerateConversationTitle(projectId: string, conversationId: string): Promise<ConversationRecord> { return request(`/projects/${projectId}/conversations/${conversationId}/title`, { method: 'POST' }) },
+  setConversationMode(projectId: string, conversationId: string, mode: 'chat' | 'agent'): Promise<ConversationRecord> { return request(`/projects/${projectId}/conversations/${conversationId}`, { method: 'PATCH', body: JSON.stringify({ mode }) }) },
+  conversationInterrupts(projectId: string, conversationId: string): Promise<ConversationInterruptRecord[]> { return request(`/projects/${projectId}/conversations/${conversationId}/interrupts`) },
+  decideConversationInterrupt(projectId: string, conversationId: string, interruptId: string, decision: 'approve' | 'edit' | 'reject', reason = '', editedAction: Record<string, any> = {}): Promise<{ conversation: ConversationRecord; assistantMessage: ConversationMessageRecord }> { return request(`/projects/${projectId}/conversations/${conversationId}/interrupts/${interruptId}/decide`, { method: 'POST', body: JSON.stringify({ decision, reason, editedAction }) }) },
+  conversationWorkspace(projectId: string, conversationId: string): Promise<{ files: { path: string; size: number }[] }> { return request(`/projects/${projectId}/conversations/${conversationId}/workspace`) },
   connectEvents(projectId: string, onEvent: (event: MessageEvent) => void): EventSource {
     const source = new EventSource(`${API_BASE}/projects/${projectId}/events?access_token=${encodeURIComponent(authTokens.access())}`)
     for (const event of ['task.status_changed', 'task.created', 'iteration.started', 'project.updated']) source.addEventListener(event, onEvent)

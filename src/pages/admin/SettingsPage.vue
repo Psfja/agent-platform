@@ -1,15 +1,82 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Bell, Check, CheckCircle2, ChevronDown, Cloud, Database, Eye, EyeOff, Github, Globe2, KeyRound, Link2, LockKeyhole, Mail, MessageSquare, Plus, Save, Server, Settings, ShieldCheck, Sparkles, TestTube2, Trash2, Webhook } from 'lucide-vue-next'
-import PageTitle from '../../components/PageTitle.vue'
+import { onMounted, ref } from 'vue'
+import { Bell, Cloud, Database, Github, Globe2, Info, KeyRound, LockKeyhole, Mail, MessageSquare, RefreshCcw, Server, Settings, ShieldCheck, Sparkles, Workflow } from 'lucide-vue-next'
+import { api, type SettingsStatus } from '../../api/client'
 import { useAppStore } from '../../stores/app'
+import PageTitle from '../../components/PageTitle.vue'
+import StatusBadge from '../../components/StatusBadge.vue'
 
-const app=useAppStore();const tab=ref('models');const showKey=ref(false);const providers=ref([{id:'deepseek',name:'DeepSeek',logo:'DS',models:'deepseek-chat / deepseek-coder',endpoint:'https://api.deepseek.com/v1',status:'connected',latency:'842 ms',enabled:true},{id:'qwen',name:'通义千问',logo:'QW',models:'qwen-max / qwen-plus / qwen-coder',endpoint:'https://dashscope.aliyuncs.com/compatible-mode/v1',status:'connected',latency:'680 ms',enabled:true},{id:'glm',name:'智谱 GLM',logo:'GLM',models:'glm-4-plus / codegeex-4',endpoint:'https://open.bigmodel.cn/api/paas/v4',status:'untested',latency:'—',enabled:false}]);const notices=ref([{event:'任务失败',email:true,wecom:true,ding:false},{event:'人工审批请求',email:true,wecom:true,ding:true},{event:'部署完成',email:false,wecom:true,ding:false},{event:'资源使用告警',email:true,wecom:true,ding:false}])
-function save(){app.toast('设置已保存','平台配置已更新并写入审计日志。')}
+const app=useAppStore()
+const tab=ref('models');const loading=ref(false);const errorMessage=ref('')
+const status=ref<SettingsStatus|null>(null)
+const llmDetail=ref<{configured:boolean;provider:string;model:string;message:string}|null>(null)
+function yesNo(value:boolean){return value?'已配置':'未配置'}
+function field(value:string|undefined|null,fallback='—'){return value||fallback}
+async function load(){loading.value=true;errorMessage.value='';try{status.value=await api.settingsStatus();llmDetail.value=await api.agentBuildStatus().catch(()=>null)}catch(error){errorMessage.value=error instanceof Error?error.message:'无法加载平台配置'}finally{loading.value=false}}
+onMounted(load)
 </script>
-<template><div class="content-width admin-page settings-page"><PageTitle eyebrow="PLATFORM ADMIN" title="系统设置" description="管理模型服务、外部对接、通知与平台安全配置。"><button class="button primary" @click="save"><Save :size="16"/>保存设置</button></PageTitle><div class="settings-layout"><aside class="settings-nav panel"><button v-for="item in [['models','模型服务',Sparkles],['git','Git 对接',Github],['notifications','通知渠道',Bell],['security','安全策略',ShieldCheck],['general','通用设置',Settings]]" :key="item[0] as string" :class="{active:tab===item[0]}" @click="tab=item[0] as string"><component :is="item[2]" :size="17"/>{{item[1]}}</button></aside><main>
-<section v-if="tab==='models'" class="settings-section"><div class="settings-section-head"><div><h2>模型服务</h2><p>配置平台可用的 LLM 提供商，智能体类型可独立选择推荐模型。</p></div><button class="button secondary"><Plus :size="15"/>添加提供商</button></div><div class="provider-list"><article v-for="provider in providers" :key="provider.id" class="panel provider-card"><span class="provider-logo">{{provider.logo}}</span><div class="provider-main"><div><h3>{{provider.name}}</h3><span v-if="provider.status==='connected'"><i></i>连接正常 · {{provider.latency}}</span><span v-else class="muted"><i></i>尚未测试</span></div><p>{{provider.models}}</p><code>{{provider.endpoint}}</code></div><button class="toggle-control" :class="{on:provider.enabled}" @click="provider.enabled=!provider.enabled"><i></i></button><button class="filter-button">配置<ChevronDown :size="14"/></button></article></div><section class="panel model-gateway"><header><span><Globe2 :size="19"/></span><div><h3>统一模型网关</h3><p>所有模型请求通过 OpenAI 兼容网关转发</p></div><span class="gateway-status"><i></i>运行正常</span></header><div class="settings-form"><label><span>Gateway URL</span><input value="http://one-api.internal/v1"/></label><label><span>默认模型</span><button>deepseek-chat<ChevronDown :size="14"/></button></label><label class="full"><span>Gateway API Key</span><div class="secret-input"><KeyRound :size="15"/><input :type="showKey?'text':'password'" value="sk-agent-platform-gateway-2026"/><button @click="showKey=!showKey"><EyeOff v-if="showKey" :size="15"/><Eye v-else :size="15"/></button></div></label></div></section></section>
-<section v-else-if="tab==='git'" class="settings-section"><div class="settings-section-head"><div><h2>Git 服务对接</h2><p>配置企业代码仓库，项目生成后可自动推送代码和创建分支。</p></div><button class="button secondary"><Plus :size="15"/>添加 Git 服务</button></div><div class="integration-cards"><article class="panel connected"><span class="integration-logo dark"><Github :size="22"/></span><div><h3>企业 GitLab</h3><p>https://gitlab.company.internal</p><span><CheckCircle2 :size="14"/>已连接 · 账号 agent-platform-bot</span></div><button class="filter-button">管理</button></article><article class="panel"><span class="integration-logo"><Github :size="22"/></span><div><h3>GitHub Enterprise</h3><p>通过 OAuth App 连接企业实例</p><span class="not-connected">未配置</span></div><button class="button secondary">连接</button></article><article class="panel"><span class="integration-logo blue"><Cloud :size="22"/></span><div><h3>工蜂 Gongfeng</h3><p>使用 Access Token 连接腾讯工蜂</p><span class="not-connected">未配置</span></div><button class="button secondary">连接</button></article></div><section class="panel git-policy"><header><h3>默认分支策略</h3><p>新项目及增量迭代使用以下规则</p></header><div class="settings-form"><label><span>主分支名称</span><input value="main"/></label><label><span>功能分支格式</span><input value="feature/{iteration-version}"/></label><label><span>增量迭代完成后</span><button>创建 Merge Request<ChevronDown :size="14"/></button></label><label><span>提交信息规范</span><button>Conventional Commits<ChevronDown :size="14"/></button></label></div></section></section>
-<section v-else-if="tab==='notifications'" class="settings-section"><div class="settings-section-head"><div><h2>通知渠道</h2><p>配置关键项目事件的企业通知方式。</p></div></div><div class="channel-cards"><article class="panel"><span class="channel-icon mail"><Mail :size="20"/></span><div><h3>邮件通知</h3><p>SMTP · smtp.company.com</p><span><i></i>已启用</span></div><button class="toggle-control on"><i></i></button></article><article class="panel"><span class="channel-icon wecom">企</span><div><h3>企业微信</h3><p>机器人 Webhook</p><span><i></i>已启用</span></div><button class="toggle-control on"><i></i></button></article><article class="panel"><span class="channel-icon ding">钉</span><div><h3>钉钉</h3><p>自定义机器人</p><span class="off"><i></i>未启用</span></div><button class="toggle-control"><i></i></button></article></div><section class="panel notification-matrix"><header><h3>事件通知规则</h3><p>选择不同事件需要发送到哪些渠道</p></header><table><thead><tr><th>事件</th><th>邮件</th><th>企业微信</th><th>钉钉</th></tr></thead><tbody><tr v-for="row in notices" :key="row.event"><td>{{row.event}}</td><td><label class="check-ui"><input type="checkbox" v-model="row.email"/><span><Check :size="12"/></span></label></td><td><label class="check-ui"><input type="checkbox" v-model="row.wecom"/><span><Check :size="12"/></span></label></td><td><label class="check-ui"><input type="checkbox" v-model="row.ding"/><span><Check :size="12"/></span></label></td></tr></tbody></table></section></section>
-<section v-else-if="tab==='security'" class="settings-section"><div class="settings-section-head"><div><h2>安全策略</h2><p>管理登录、凭据与智能体沙箱安全限制。</p></div></div><section class="panel security-groups"><article><span><LockKeyhole :size="19"/></span><div><h3>企业单点登录</h3><p>已启用 LDAP 登录，允许 OAuth2.0 作为备用方式</p></div><button class="filter-button">配置</button></article><article><span><KeyRound :size="19"/></span><div><h3>敏感凭据加密</h3><p>API Key 与 Git Token 使用 AES-256 加密存储</p></div><StatusBadge status="completed" label="已启用"/></article><article><span><ShieldCheck :size="19"/></span><div><h3>沙箱网络策略</h3><p>默认禁止访问内网，仅允许白名单域名</p></div><button class="filter-button">管理白名单</button></article></section></section>
-<section v-else class="settings-section"><div class="settings-section-head"><div><h2>通用设置</h2><p>平台名称、默认语言、时区和项目策略。</p></div></div><section class="panel general-settings"><div class="settings-form"><label><span>平台名称</span><input value="智构 · 企业智能体平台"/></label><label><span>默认语言</span><button>简体中文<ChevronDown :size="14"/></button></label><label><span>系统时区</span><button>Asia/Shanghai (UTC+8)<ChevronDown :size="14"/></button></label><label><span>项目删除冷却期</span><div class="suffix-input"><input value="30"/><span>天</span></div></label></div></section></section></main></div></div></template>
+
+<template>
+  <div class="content-width admin-page settings-page">
+    <PageTitle eyebrow="PLATFORM ADMIN" title="系统设置" description="查看平台当前生效的模型网关、外部对接、通知与安全配置（只读状态）。">
+      <button class="button secondary" @click="load"><RefreshCcw :size="16"/>{{loading?'加载中…':'刷新状态'}}</button>
+    </PageTitle>
+    <div v-if="errorMessage" class="admin-empty"><p>{{errorMessage}}</p><button class="button secondary" @click="load">重试</button></div>
+    <template v-else-if="status">
+      <div class="smart-tip" style="margin-bottom:13px"><Info :size="16"/><div><b>配置为只读状态</b><span>平台配置通过后端 <code>backend/.env</code> 环境变量管理，修改后需重启 API 服务生效；密钥类配置不会在前端展示。</span></div></div>
+      <div class="settings-layout">
+        <aside class="settings-nav panel"><button v-for="item in [['models','模型网关',Sparkles],['git','Git 对接',Github],['notifications','通知渠道',Bell],['security','安全与 SSO',ShieldCheck],['general','通用配置',Settings]] as const" :key="item[0]" :class="{active:tab===item[0]}" @click="tab=item[0]"><component :is="item[2]" :size="17"/>{{item[1]}}</button></aside>
+        <main>
+          <section v-if="tab==='models'" class="panel settings-section">
+            <div class="settings-section-head" style="padding:0 15px"><div><h3 style="margin:0">LLM 模型网关</h3><p style="margin:5px 0 0;color:var(--text-3);font-size:8px">DeepAgents 与生成应用通过 OpenAI 兼容网关调用模型</p></div><StatusBadge :status="status.llm.configured?'completed':'paused'" :label="status.llm.configured?'已配置':'未配置'"/></div>
+            <div class="settings-form">
+              <label><span>网关地址</span><code class="config-value">{{field(status.llm.baseUrl)}}</code></label>
+              <label><span>默认模型</span><code class="config-value">{{field(status.llm.model)}}</code></label>
+              <label><span>Agent 引擎</span><code class="config-value">{{status.llm.engine}}（{{status.llm.configured?'真实执行':'无 Key 时明确报错'}}）</code></label>
+              <label><span>超时 / 重试</span><code class="config-value">{{status.llm.timeoutSeconds}}s / {{status.llm.maxRetries}} 次</code></label>
+            </div>
+            <div v-if="llmDetail" class="gateway-note"><Globe2 :size="15"/><span>{{llmDetail.message}}</span></div>
+          </section>
+          <section v-else-if="tab==='git'" class="panel settings-section">
+            <div class="settings-section-head" style="padding:0 15px"><div><h3 style="margin:0">Git 代码仓库</h3><p style="margin:5px 0 0;color:var(--text-3);font-size:8px">生成应用源码提交与可选自动推送</p></div><StatusBadge :status="status.git.configured?'completed':'paused'" :label="status.git.configured?'已配置':'未配置'"/></div>
+            <div class="settings-form">
+              <label class="full"><span>远端仓库地址</span><code class="config-value">{{field(status.git.remote,'未配置（仅本地 Git 提交）')}}</code></label>
+              <label><span>默认分支</span><code class="config-value">{{status.git.defaultBranch}}</code></label>
+            </div>
+          </section>
+          <section v-else-if="tab==='notifications'" class="panel settings-section">
+            <div class="settings-section-head" style="padding:0 15px"><div><h3 style="margin:0">通知渠道</h3><p style="margin:5px 0 0;color:var(--text-3);font-size:8px">站内通知始终可用，以下为外部渠道状态</p></div></div>
+            <div class="settings-form">
+              <label><span><Mail :size="13"/> 邮件（SMTP）</span><code class="config-value">{{yesNo(status.notifications.smtp.configured)}}{{status.notifications.smtp.host?` · ${status.notifications.smtp.host}:${status.notifications.smtp.port}`:''}}</code></label>
+              <label><span><MessageSquare :size="13"/> Webhook</span><code class="config-value">{{yesNo(status.notifications.webhook.configured)}}</code></label>
+            </div>
+          </section>
+          <section v-else-if="tab==='security'" class="panel settings-section">
+            <div class="settings-section-head" style="padding:0 15px"><div><h3 style="margin:0">安全与单点登录</h3><p style="margin:5px 0 0;color:var(--text-3);font-size:8px">JWT、OIDC 与 LDAP 配置状态</p></div></div>
+            <div class="settings-form">
+              <label><span><KeyRound :size="13"/> JWT 算法</span><code class="config-value">{{status.security.jwtAlgorithm}}</code></label>
+              <label><span>Access / Refresh 有效期</span><code class="config-value">{{status.security.accessTokenMinutes}} 分钟 / {{status.security.refreshTokenDays}} 天</code></label>
+              <label><span><ShieldCheck :size="13"/> 企业 OIDC</span><code class="config-value">{{status.sso.oidc.configured?`已配置 · ${field(status.sso.oidc.issuer)}`:'未配置'}}</code></label>
+              <label><span><LockKeyhole :size="13"/> LDAP</span><code class="config-value">{{status.sso.ldap.configured?`已配置 · ${field(status.sso.ldap.url)}`:'未配置'}}</code></label>
+              <label class="full"><span>OIDC Client ID</span><code class="config-value">{{field(status.sso.oidc.clientId,'—')}}</code></label>
+            </div>
+          </section>
+          <section v-else class="panel settings-section">
+            <div class="settings-section-head" style="padding:0 15px"><div><h3 style="margin:0">通用配置</h3><p style="margin:5px 0 0;color:var(--text-3);font-size:8px">平台运行环境与存储信息</p></div></div>
+            <div class="settings-form">
+              <label><span>平台名称</span><code class="config-value">{{status.platform.name}}</code></label>
+              <label><span>运行环境</span><code class="config-value">{{status.platform.environment}}（debug {{status.platform.debug?'开':'关'}}）</code></label>
+              <label><span><Database :size="13"/> 主数据库</span><code class="config-value">{{status.database.engine}} · 自动迁移 {{status.database.migrationsEnabled?'开':'关'}}</code></label>
+              <label><span><Cloud :size="13"/> 对象存储</span><code class="config-value">{{status.storage.minio.configured?`MinIO · ${field(status.storage.minio.endpoint)}/${field(status.storage.minio.bucket)}`:'本地文件降级'}}</code></label>
+              <label><span><Workflow :size="13"/> 任务队列</span><code class="config-value">{{status.queue.redisAvailable?'Redis':'线程降级'}} · {{status.queue.queueName}}</code></label>
+              <label><span><Server :size="13"/> 沙箱后端</span><code class="config-value">{{status.sandbox.activeBackend}}（{{status.sandbox.isolation}}）</code></label>
+              <label><span>部署公网主机</span><code class="config-value">{{field(status.deployment.publicHost)}}</code></label>
+              <label><span>生成应用数据库</span><code class="config-value">{{status.deployment.generatedDatabaseConfigured?'独立 Schema + 备份恢复':'未配置（应用内建存储）'}}</code></label>
+              <label class="full"><span>状态生成时间</span><code class="config-value">{{new Date(status.generatedAt).toLocaleString('zh-CN',{hour12:false})}}</code></label>
+            </div>
+          </section>
+        </main>
+      </div>
+    </template>
+  </div>
+</template>

@@ -1,0 +1,19 @@
+{
+  "name": "ui-redesign",
+  "display_name": "前端设计审计与优化",
+  "version": "1.0.0",
+  "description": "对现有前端界面执行设计审计（排版、配色、布局、交互状态、组件模式），并输出按优先级排序的优化清单。基于 taste-skill 的 redesign 技能（MIT，github.com/Leonxlnx/taste-skill）。",
+  "instructions": "SKILL.md",
+  "entrypoint": "main.py",
+  "agent_types": ["frontend-developer", "code-reviewer", "architect"],
+  "tags": ["ui", "design", "audit", "taste", "frontend"],
+  "input_schema": {
+    "type": "object",
+    "required": ["css"],
+    "properties": {
+      "css": {"type": "string", "description": "CSS 或样式代码文本"},
+      "html": {"type": "string", "description": "可选：HTML/模板片段"},
+      "framework": {"type": "string", "description": "技术栈标识，如 vue/vanilla/tailwind"}
+    }
+  }
+}

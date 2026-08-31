@@ -85,6 +85,12 @@ def require_platform_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def require_super_admin(user: User = Depends(get_current_user)) -> User:
+    if user.platform_role != "super_admin":
+        raise AppError(403, "SUPER_ADMIN_REQUIRED", "该操作仅超级管理员可执行")
+    return user
+
+
 def enforce_project_access(
     request: Request,
     user: User = Depends(get_current_user),

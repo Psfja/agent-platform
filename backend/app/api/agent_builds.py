@@ -55,7 +55,7 @@ def create_agent_build(project_id: str, payload: AgentBuildCreate, db: Session =
     item = AgentBuild(
         id=f"agent-build-{uuid_str()}", project_id=project_id, iteration_id=payload.iteration_id,
         requirement=payload.requirement, template=payload.template, model=model,
-        status="pending", current_stage="queued", progress=0, max_fix_attempts=payload.max_fix_attempts,
+        temperature=payload.temperature, status="pending", current_stage="queued", progress=0, max_fix_attempts=payload.max_fix_attempts,
         plan={"_meta": {"mode": payload.mode, "baseBuildId": payload.base_build_id, "changedFilesCount": 0, "autoDeploy": payload.auto_deploy, "deployEnvironment": payload.deploy_environment, "engine": payload.engine or settings.agent_engine}},
     )
     db.add(item)

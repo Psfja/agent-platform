@@ -1,11 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { projects as initialProjects } from '../data/mock'
 import { api, ApiError, authTokens, type AuthUser } from '../api/client'
 import type { Project } from '../types'
 
 export const useAppStore = defineStore('app', () => {
-  const projects = ref<Project[]>([...initialProjects])
+  const projects = ref<Project[]>([])
   const projectsLoading = ref(false)
   const backendConnected = ref(false)
   const currentUser = ref<AuthUser | null>(null)
@@ -27,7 +26,8 @@ export const useAppStore = defineStore('app', () => {
       backendConnected.value = true
     } catch (error) {
       backendConnected.value = false
-      if (!silent) toast('后端暂不可用', error instanceof Error ? error.message : '已保留本地演示数据。')
+      projects.value = []
+      if (!silent) toast('后端暂不可用', error instanceof Error ? error.message : '无法加载项目列表。')
     } finally {
       projectsLoading.value = false
     }

@@ -48,4 +48,5 @@ export interface Iteration {
   tests: number
   deployStatus: string
   type: 'feature' | 'fix' | 'initial'
+  impactAnalysis?: Record<string, unknown> | null
 }

@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+!.env.docker.example
+
+# Runtime data (sandboxes, checkpoints, uploads, backups, local SQLite)
+backend/data/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# E2E 与压测产物
+e2e-results/
+playwright-report/
+test-results/
+locust_report*.html

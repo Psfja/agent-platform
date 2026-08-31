@@ -1,13 +1,81 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Activity, Bot, BrainCircuit, ChevronDown, Clock3, Copy, Cpu, Database, MoreHorizontal, Plus, Search, ShieldCheck, Sparkles, Terminal, TestTube2, ToggleLeft, Wrench } from 'lucide-vue-next'
-import PageTitle from '../../components/PageTitle.vue'
-import StatusBadge from '../../components/StatusBadge.vue'
+import { Bot, Copy, Plus, Search, ShieldCheck, Trash2, X } from 'lucide-vue-next'
+import { api, type AgentTypeRecord } from '../../api/client'
 import { useAppStore } from '../../stores/app'
+import PageTitle from '../../components/PageTitle.vue'
 
-const router=useRouter();const app=useAppStore();const query=ref('');const agents=ref([{id:'project-manager',name:'项目经理',key:'project-manager',icon:'PM',description:'需求理解、任务拆解、智能体协调与项目风险管理',model:'deepseek-chat',tools:8,skills:5,success:96.8,duration:'18m',runs:284,status:true,color:'indigo'},{id:'architect',name:'架构设计师',key:'architect',icon:'AR',description:'技术选型、系统架构、数据库设计与增量方案评审',model:'qwen-max',tools:7,skills:6,success:94.2,duration:'24m',runs:196,status:true,color:'blue'},{id:'frontend',name:'前端开发工程师',key:'frontend-developer',icon:'FE',description:'Vue 3 前端开发、组件设计、交互与可访问性实现',model:'deepseek-coder',tools:10,skills:8,success:92.6,duration:'42m',runs:318,status:true,color:'purple'},{id:'backend',name:'后端开发工程师',key:'backend-developer',icon:'BE',description:'FastAPI 服务、业务逻辑、接口与数据库访问实现',model:'deepseek-coder',tools:12,skills:9,success:93.7,duration:'48m',runs:326,status:true,color:'green'},{id:'reviewer',name:'代码审查工程师',key:'code-reviewer',icon:'CR',description:'代码规范、安全风险、兼容性与最佳实践审查',model:'qwen-max',tools:6,skills:7,success:97.4,duration:'16m',runs:301,status:true,color:'amber'},{id:'tester',name:'测试工程师',key:'test-engineer',icon:'QA',description:'单元、集成、E2E 与回归测试生成及执行',model:'deepseek-coder',tools:11,skills:8,success:95.1,duration:'31m',runs:292,status:true,color:'cyan'},{id:'deployer',name:'部署工程师',key:'deployment-engineer',icon:'DO',description:'Docker 镜像构建、环境部署、健康检查与回滚',model:'qwen-plus',tools:9,skills:5,success:98.2,duration:'8m',runs:188,status:true,color:'slate'},{id:'database',name:'数据库工程师',key:'database-engineer',icon:'DB',description:'Schema 设计、查询优化、迁移脚本与数据安全',model:'qwen-max',tools:8,skills:6,success:91.8,duration:'27m',runs:116,status:false,color:'rose'}])
-const filtered=computed(()=>agents.value.filter(a=>`${a.name}${a.key}${a.description}`.toLowerCase().includes(query.value.toLowerCase())))
-function toggle(agent:typeof agents.value[number]){agent.status=!agent.status;app.toast(agent.status?'智能体已启用':'智能体已停用',`${agent.name}配置已更新。`)}
+const router=useRouter();const app=useAppStore()
+const agents=ref<AgentTypeRecord[]>([]);const loading=ref(false);const search=ref('');const errorMessage=ref('')
+const pendingDelete=ref<AgentTypeRecord|null>(null);const deleting=ref(false)
+const COLORS=['#6255d9','#3984df','#8b5bd9','#129c71','#d68a21','#2aa3a3','#5d6b83','#c05b7a']
+const filtered=computed(()=>agents.value.filter(a=>`${a.displayName}${a.name}${a.description}${a.model}`.toLowerCase().includes(search.value.toLowerCase())))
+const metrics=computed(()=>({
+  total:agents.value.length,
+  active:agents.value.filter(a=>a.isActive).length,
+  templates:agents.value.filter(a=>a.isTemplate).length,
+  skills:new Set(agents.value.flatMap(a=>a.skills)).size,
+}))
+async function load(){loading.value=true;errorMessage.value='';try{agents.value=await api.agentTypes()}catch(error){errorMessage.value=error instanceof Error?error.message:'无法加载智能体类型'}finally{loading.value=false}}
+async function toggle(agent:AgentTypeRecord){try{const updated=await api.updateAgentType(agent.id,{isActive:!agent.isActive});const index=agents.value.findIndex(a=>a.id===agent.id);if(index>=0)agents.value[index]=updated;app.toast(updated.isActive?'智能体已启用':'智能体已停用',`${updated.displayName} 已更新为配置版本 v${updated.version}。`)}catch(error){app.toast('操作失败',error instanceof Error?error.message:'请确认该智能体未被流程模板引用')}}
+async function remove(){if(!pendingDelete.value)return;deleting.value=true;try{const target=pendingDelete.value;await api.deleteAgentType(target.id);agents.value=agents.value.filter(a=>a.id!==target.id);app.toast('已删除',`${target.displayName} 已从平台移除。`);pendingDelete.value=null}catch(error){app.toast('删除失败',error instanceof Error?error.message:'该智能体正在被流程或任务使用')}finally{deleting.value=false}}
+onMounted(load)
 </script>
-<template><div class="content-width admin-page agent-types-page"><PageTitle eyebrow="PLATFORM ADMIN" title="智能体类型" description="配置平台中的专业智能体角色、模型、工具与技能。"><button class="button secondary"><Activity :size="16"/>执行数据</button><button class="button primary" @click="router.push('/admin/agent-types/new')"><Plus :size="16"/>创建智能体类型</button></PageTitle><div class="admin-metrics"><article><span class="metric-icon indigo"><Bot :size="19"/></span><div><small>智能体类型</small><strong>8</strong><em>7 个已启用</em></div></article><article><span class="metric-icon green"><Activity :size="19"/></span><div><small>本月执行</small><strong>2,041</strong><em class="green-text">+18.6%</em></div></article><article><span class="metric-icon blue"><ShieldCheck :size="19"/></span><div><small>平均成功率</small><strong>95.0%</strong><em class="green-text">+1.4%</em></div></article><article><span class="metric-icon amber"><Cpu :size="19"/></span><div><small>Token 消耗</small><strong>42.8M</strong><em>预算内 68%</em></div></article></div><section class="panel agent-list-panel"><header class="table-toolbar"><div class="inline-search admin-search"><Search :size="15"/><input v-model="query" placeholder="搜索智能体名称或能力"/></div><div><button class="filter-button">全部状态<ChevronDown :size="14"/></button><button class="filter-button">全部模型<ChevronDown :size="14"/></button></div></header><div class="agent-type-grid"><article v-for="agent in filtered" :key="agent.id" class="agent-type-card" @click="router.push(`/admin/agent-types/${agent.id}`)"><header><span class="agent-type-avatar" :class="agent.color">{{agent.icon}}<i v-if="agent.status"></i></span><div><h3>{{agent.name}}</h3><code>{{agent.key}}</code></div><button class="icon-button" @click.stop><MoreHorizontal :size="17"/></button></header><p>{{agent.description}}</p><div class="agent-config-row"><span><BrainCircuit :size="14"/>{{agent.model}}</span><span><Wrench :size="14"/>{{agent.tools}} 工具</span><span><Sparkles :size="14"/>{{agent.skills}} Skills</span></div><div class="agent-performance"><div><small>成功率</small><strong>{{agent.success}}%</strong><i><em :style="{width:`${agent.success}%`}"></em></i></div><div><small>平均耗时</small><strong>{{agent.duration}}</strong></div><div><small>累计执行</small><strong>{{agent.runs}}</strong></div></div><footer><span :class="['agent-enabled',agent.status?'on':'off']"><i></i>{{agent.status?'已启用':'已停用'}}</span><button class="toggle-control" :class="{on:agent.status}" @click.stop="toggle(agent)"><i></i></button></footer></article></div></section></div></template>
+
+<template>
+  <div class="content-width admin-page agents-page">
+    <PageTitle eyebrow="AGENT STUDIO" title="智能体类型" description="管理平台可用的专业智能体角色、模型、工具与 Skills 装配。">
+      <button class="button primary" @click="router.push('/admin/agent-types/new')"><Plus :size="16"/>创建智能体</button>
+    </PageTitle>
+    <div class="admin-metrics">
+      <article><span class="metric-icon indigo"><Bot :size="19"/></span><div><small>智能体类型</small><strong>{{metrics.total}}</strong><em>含系统预置与自定义</em></div></article>
+      <article><span class="metric-icon green"><ShieldCheck :size="19"/></span><div><small>已启用</small><strong>{{metrics.active}}</strong><em>可用于流程编排</em></div></article>
+      <article><span class="metric-icon blue"><Copy :size="19"/></span><div><small>流程模板</small><strong>{{metrics.templates}}</strong><em>由预置类型构成</em></div></article>
+      <article><span class="metric-icon amber"><Bot :size="19"/></span><div><small>已装配 Skills</small><strong>{{metrics.skills}}</strong><em>按类型去重统计</em></div></article>
+    </div>
+    <section class="panel agent-list-panel">
+      <header class="table-toolbar">
+        <div class="inline-search admin-search"><Search :size="15"/><input v-model="search" placeholder="搜索名称、标识、说明或模型"/></div>
+        <div><button class="filter-button" @click="load"><Bot :size="14"/>{{loading?'加载中…':'刷新'}}</button></div>
+      </header>
+      <div v-if="errorMessage" class="admin-empty"><p>{{errorMessage}}</p><button class="button secondary" @click="load">重试</button></div>
+      <table v-else-if="loading" class="data-table agent-type-table">
+        <thead><tr><th>智能体</th><th>职责说明</th><th>模型</th><th>工具 / Skills</th><th>配置版本</th><th>状态</th><th></th></tr></thead>
+        <tbody>
+          <tr v-for="row in 6" :key="row">
+            <td><div class="member-cell"><span class="skeleton skeleton-avatar"></span><div style="flex:1"><div class="skeleton skeleton-cell" style="width:80px"></div><div class="skeleton skeleton-cell" style="width:110px"></div></div></div></td>
+            <td><div class="skeleton skeleton-cell" style="width:180px"></div></td>
+            <td><span class="skeleton skeleton-chip"></span></td>
+            <td><span class="skeleton skeleton-chip"></span><span class="skeleton skeleton-chip" style="width:48px;margin-left:5px"></span></td>
+            <td><div class="skeleton skeleton-cell" style="width:40px"></div></td>
+            <td><span class="skeleton skeleton-chip" style="width:40px"></span></td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+      <table v-else class="data-table agent-type-table">
+        <thead><tr><th>智能体</th><th>职责说明</th><th>模型</th><th>工具 / Skills</th><th>配置版本</th><th>状态</th><th></th></tr></thead>
+        <tbody>
+          <tr v-for="(agent,index) in filtered" :key="agent.id">
+            <td><div class="member-cell"><span class="agent-type-avatar" :style="{background:COLORS[index%COLORS.length]}">{{agent.displayName.slice(0,2)}}</span><div><b>{{agent.displayName}}</b><small>{{agent.name}}</small></div></div></td>
+            <td><div class="agent-desc-cell"><span>{{agent.description}}</span></div></td>
+            <td><code class="model-chip">{{agent.model}}</code></td>
+            <td><span class="role-chip">{{agent.tools.length}} 工具</span><span class="role-chip manager" style="margin-left:5px">{{agent.skills.length}} Skills</span></td>
+            <td><code>v{{agent.version}}</code><small v-if="agent.isTemplate" style="margin-left:6px" class="role-chip owner">预置</small><small v-if="agent.usage.pipelineNodes>0" style="margin-left:6px" class="role-chip" :title="`被 ${agent.usage.templateNames.join('、')} 引用`">引用 {{agent.usage.pipelineNodes}} 节点</small></td>
+            <td><button class="toggle-control" :class="{on:agent.isActive}" :title="agent.isActive?'停用':'启用'" @click="toggle(agent)"><i></i></button></td>
+            <td><div class="row-actions"><button class="button subtle" @click="router.push(`/admin/agent-types/${agent.id}`)">配置</button><button class="button danger-ghost" :disabled="agent.usage.pipelineNodes>0||agent.usage.activeTasks>0" :title="agent.usage.pipelineNodes>0?`被 ${agent.usage.templateNames.join('、')} 引用，无法删除`:agent.usage.activeTasks>0?'有进行中任务，无法删除':'删除该智能体类型'" @click="pendingDelete=agent"><Trash2 :size="14"/></button></div></td>
+          </tr>
+          <tr v-if="!loading && !filtered.length"><td colspan="7" class="deployment-empty-row">没有匹配的智能体类型</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <div v-if="pendingDelete" class="modal-layer" @click.self="pendingDelete=null">
+      <section class="dialog" style="width:min(430px,calc(100vw - 50px))">
+        <header class="dialog-head"><div><span class="dialog-kicker">DELETE AGENT TYPE</span><h2>删除智能体类型</h2></div><button class="icon-button" @click="pendingDelete=null"><X :size="18"/></button></header>
+        <div class="dialog-body"><p class="dialog-text">确定删除 <b>{{pendingDelete.displayName}}</b>（{{pendingDelete.name}}）吗？该智能体未被任何流程模板或任务引用，删除后配置版本历史将一并移除。</p></div>
+        <footer class="dialog-foot"><span class="dialog-note">此操作不可撤销</span><div style="display:flex;gap:8px"><button class="button ghost" @click="pendingDelete=null">取消</button><button class="button danger-ghost" :disabled="deleting" @click="remove"><Trash2 :size="15"/>{{deleting?'删除中…':'确认删除'}}</button></div></footer>
+      </section>
+    </div>
+  </div>
+</template>

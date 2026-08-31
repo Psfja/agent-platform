@@ -68,6 +68,419 @@ def test_agent_type_pipeline_and_monitoring_admin_apis(client):
     assert sso.json()["providers"] == []
 
 
+def test_admin_user_management_and_settings_status(client):
+    admin = client.post("/api/v1/auth/login", json={"email": "admin@company.com", "password": "Admin@2026"}).json()
+    headers = {"Authorization": f"Bearer {admin['accessToken']}"}
+
+    # 普通用户访问被拒绝
+    assert client.get("/api/v1/admin/users").status_code == 403
+
+    # 创建用户（自动生成初始密码）
+    created = client.post("/api/v1/admin/users", headers=headers, json={"email": "new.hire@company.com", "displayName": "新员工", "department": "信息技术部", "platformRole": "platform_admin"})
+    assert created.status_code == 201, created.text
+    body = created.json()
+    user_id = body["user"]["id"]
+    assert body["user"]["email"] == "new.hire@company.com"
+    assert body["user"]["platformRole"] == "platform_admin"
+    assert len(body["tempPassword"]) >= 12
+    # 新用户可用初始密码登录
+    login = client.post("/api/v1/auth/login", json={"email": "new.hire@company.com", "password": body["tempPassword"]})
+    assert login.status_code == 200, login.text
+
+    # 重复邮箱冲突
+    assert client.post("/api/v1/admin/users", headers=headers, json={"email": "new.hire@company.com", "displayName": "重复", "department": ""}).status_code == 409
+
+    # 列表包含新用户
+    users = client.get("/api/v1/admin/users", headers=headers)
+    assert users.status_code == 200
+    assert any(item["id"] == user_id for item in users.json())
+
+    # 更新角色与停用
+    updated = client.patch(f"/api/v1/admin/users/{user_id}", headers=headers, json={"platformRole": "user", "department": "平台工程部", "isActive": False})
+    assert updated.status_code == 200
+    assert updated.json()["platformRole"] == "user" and updated.json()["isActive"] is False
+    # 停用后无法登录
+    assert client.post("/api/v1/auth/login", json={"email": "new.hire@company.com", "password": body["tempPassword"]}).status_code == 401
+
+    # 重置密码后可用新密码登录
+    reset = client.patch(f"/api/v1/admin/users/{user_id}", headers=headers, json={"isActive": True, "newPassword": "NewPass@2026"})
+    assert reset.status_code == 200
+    assert client.post("/api/v1/auth/login", json={"email": "new.hire@company.com", "password": "NewPass@2026"}).status_code == 200
+
+    # 不能删除/停用自己
+    assert client.delete(f"/api/v1/admin/users/{admin['user']['id']}", headers=headers).status_code == 409
+    assert client.patch(f"/api/v1/admin/users/{admin['user']['id']}", headers=headers, json={"isActive": False}).status_code == 409
+
+    # 删除用户
+    assert client.delete(f"/api/v1/admin/users/{user_id}", headers=headers).status_code == 204
+    assert client.get("/api/v1/admin/users", headers=headers).status_code == 200
+
+    # 平台管理员不能创建/降级超级管理员
+    zhao = client.post("/api/v1/auth/login", json={"email": "zhao.wei@company.com", "password": "Agent@2026"}).json()
+    zhao_headers = {"Authorization": f"Bearer {zhao['accessToken']}"}
+    assert client.post("/api/v1/admin/users", headers=zhao_headers, json={"email": "another.admin@company.com", "displayName": "超管候选", "platformRole": "super_admin"}).status_code == 403
+    assert client.patch(f"/api/v1/admin/users/{admin['user']['id']}", headers=zhao_headers, json={"platformRole": "user"}).status_code == 403
+
+    # 系统设置状态（脱敏）
+    settings_status = client.get("/api/v1/settings/status", headers=headers)
+    assert settings_status.status_code == 200
+    payload = settings_status.json()
+    assert payload["database"]["engine"] in {"sqlite", "postgresql"}
+    assert payload["llm"]["configured"] is False  # 测试环境未配置模型 Key
+    assert "apiKey" not in str(payload) and "password" not in str(payload)
+
+
+def test_pipeline_generate_with_scripted_model(client, monkeypatch):
+    from app.api import agent_config as agent_config_module
+    from app.services.llm_client import LLMResult
+
+    class ScriptedFlowModel:
+        model = "scripted-flow-model"
+        def chat_json(self, system, user, *, temperature=0.1):
+            return LLMResult(data={
+                "name": "Invoice-Flow_01",  # 触发标识清洗
+                "displayName": "发票识别与台账生成",
+                "description": "抽取发票字段、复核并生成台账。",
+                "templateType": "custom",
+                "nodes": [
+                    {"nodeKey": "plan", "agentTypeId": "project-manager", "displayName": "需求规划", "dependsOn": [], "executionMode": "sequential"},
+                    {"nodeKey": "extract", "agentTypeId": "backend-developer", "displayName": "字段抽取", "dependsOn": ["plan"], "executionMode": "sequential"},
+                    {"nodeKey": "review", "agentTypeId": "code-reviewer", "displayName": "质量复核", "dependsOn": ["extract"], "executionMode": "sequential"},
+                    {"nodeKey": "bogus", "agentTypeId": "not-exists", "displayName": "无效节点", "dependsOn": [], "executionMode": "sequential"},
+                    {"nodeKey": "extra", "agentTypeId": "test-engineer", "displayName": "验证", "dependsOn": ["ghost", "extra"], "executionMode": "parallel"},
+                ],
+            })
+
+    monkeypatch.setattr(agent_config_module, "pipeline_llm_client_factory", lambda model: ScriptedFlowModel())
+    admin = client.post("/api/v1/auth/login", json={"email": "admin@company.com", "password": "Admin@2026"}).json()
+    headers = {"Authorization": f"Bearer {admin['accessToken']}"}
+
+    # 普通用户被拒绝
+    assert client.post("/api/v1/admin/pipeline-templates/generate", json={"requirement": "发票识别流程"}).status_code == 403
+
+    response = client.post("/api/v1/admin/pipeline-templates/generate", headers=headers, json={"requirement": "发票识别并生成台账"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    draft = body["draft"]
+    assert draft["name"].startswith("invoice-flow-01")  # 已清洗为合法标识
+    assert draft["templateType"] == "custom"
+    keys = [n["nodeKey"] for n in draft["nodes"]]
+    assert "bogus" not in keys and "plan" in keys and "extract" in keys
+    extra = next(n for n in draft["nodes"] if n["nodeKey"] == "extra")
+    assert extra["dependsOn"] == []  # ghost 与自依赖均被清理
+    assert any("无效智能体引用" in w for w in body["warnings"])
+    # 节点按依赖拓扑排序：plan 在 extract 之前
+    assert keys.index("plan") < keys.index("extract") < keys.index("review")
+
+
+def test_pipeline_generate_requires_configured_llm(client):
+    admin = client.post("/api/v1/auth/login", json={"email": "admin@company.com", "password": "Admin@2026"}).json()
+    headers = {"Authorization": f"Bearer {admin['accessToken']}"}
+    response = client.post("/api/v1/admin/pipeline-templates/generate", headers=headers, json={"requirement": "发票识别与台账生成流程"})
+    assert response.status_code == 503  # 未配置模型网关，明确报错而非 Mock
+
+
+def test_conversation_chat_with_context_and_memory(client, monkeypatch):
+    import app.services.conversation as conversation_module
+    from app.services.llm_client import LLMResult
+
+    class ScriptedChatModel:
+        model = "scripted-chat-model"
+        def __init__(self):
+            self.chat_calls = 0
+        def chat(self, system, messages, *, temperature=0.3):
+            self.chat_calls += 1
+            if "标题" in system:
+                return "导出功能规划讨论"
+            # 上下文必须包含召回的记忆与装配的 Skill 指令
+            assert any("持久记忆" in m["content"] or "persistent memory" in m["content"].lower() or "Relevant persistent memory" in m["content"] for m in [{"content": system}] + messages)
+            last_user = next(m["content"] for m in reversed(messages) if m["role"] == "user")
+            return f"已收到：{last_user}"
+        def chat_json(self, system, user, *, temperature=0.1):
+            # 记忆提取：第一轮返回一条值得记住的事实
+            return LLMResult(data={"key": "user-preference", "content": "用户偏好中文回复并关注导出性能", "importance": 0.8})
+
+    monkeypatch.setattr(conversation_module, "conversation_client_factory", lambda model: ScriptedChatModel())
+    # 预置一条可召回的项目记忆
+    memories = client.get("/api/v1/projects/leave-hub/memories")
+    assert memories.status_code == 200
+
+    created = client.post("/api/v1/projects/leave-hub/conversations", json={"agentKey": "project-manager"})
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+    assert created.json()["agentKey"] == "project-manager"
+
+    # 第一轮对话
+    turn = client.post(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/messages", json={"content": "我们计划做一个导出功能，请给建议", "remember": True})
+    assert turn.status_code == 200, turn.text
+    body = turn.json()
+    assert body["userMessage"]["role"] == "user"
+    assert body["assistantMessage"]["role"] == "assistant"
+    assert body["assistantMessage"]["content"].startswith("已收到：")
+    assert body["assistantMessage"]["metadata"]["context"]["historyMessages"] == 0
+    assert body["assistantMessage"]["metadata"]["context"]["memoriesRecalled"] >= 0
+    assert "budgetTokens" in body["assistantMessage"]["metadata"]["context"]
+
+    # 第二轮：历史应包含上一轮消息
+    turn2 = client.post(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/messages", json={"content": "请继续", "remember": True})
+    assert turn2.status_code == 200, turn2.text
+    assert turn2.json()["assistantMessage"]["metadata"]["context"]["historyMessages"] == 2  # 上一轮的 user + assistant
+    assert turn2.json()["assistantMessage"]["content"] == "已收到：请继续"
+
+    # 详情返回全部消息，标题已由模型自动生成
+    detail = client.get(f"/api/v1/projects/leave-hub/conversations/{conversation_id}")
+    assert detail.status_code == 200
+    assert len(detail.json()["messages"]) == 4
+    assert detail.json()["title"] == "导出功能规划讨论"
+
+    # AI 重新生成标题
+    regen = client.post(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/title")
+    assert regen.status_code == 200
+    assert regen.json()["title"] == "导出功能规划讨论"
+
+    # 长期记忆提取已写入 episodic 记忆
+    all_memories = client.get("/api/v1/projects/leave-hub/memories", params={"memoryType": "episodic"})
+    episodic = [m for m in all_memories.json() if m.get("tags") and "conversation" in m["tags"]]
+    assert episodic, "对话后应自动提取长期记忆"
+    assert any("导出性能" in m["content"] for m in episodic)
+
+    # 重命名与删除
+    renamed = client.patch(f"/api/v1/projects/leave-hub/conversations/{conversation_id}", json={"title": "导出功能讨论"})
+    assert renamed.status_code == 200 and renamed.json()["title"] == "导出功能讨论"
+    assert client.delete(f"/api/v1/projects/leave-hub/conversations/{conversation_id}").status_code == 204
+    assert client.get(f"/api/v1/projects/leave-hub/conversations/{conversation_id}").status_code == 404
+
+
+def test_conversation_streaming_with_scripted_model(client, monkeypatch):
+    import json as json_module
+
+    import app.services.conversation as conversation_module
+    from app.services.llm_client import LLMResult
+
+    class ScriptedStreamModel:
+        model = "scripted-stream-model"
+        def __init__(self):
+            self.stream_calls = 0
+        def chat(self, system, messages, *, temperature=0.3):
+            if "标题" in system:
+                return "发票审核流程咨询"
+            return "fallback"
+        def chat_stream(self, system, messages, *, temperature=0.3):
+            self.stream_calls += 1
+            # 上下文必须包含记忆与 Skills 指令
+            assert "Relevant persistent memory" in system
+            for token in ["计划", "：", "先", "抽取", "发票字段", "，再", "复核"]:
+                yield token
+        def chat_json(self, system, user, *, temperature=0.1):
+            return LLMResult(data={"key": "stream-memory", "content": "流式对话确认了发票字段抽取方案", "importance": 0.7})
+
+    monkeypatch.setattr(conversation_module, "conversation_client_factory", lambda model: ScriptedStreamModel())
+    created = client.post("/api/v1/projects/leave-hub/conversations", json={"agentKey": "project-manager"})
+    assert created.status_code == 201, created.text
+    conversation_id = created.json()["id"]
+
+    events: list[dict] = []
+    with client.stream("POST", f"/api/v1/projects/leave-hub/conversations/{conversation_id}/messages/stream", json={"content": "请规划发票审核流程", "remember": True}) as response:
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"].startswith("text/event-stream")
+        for line in response.iter_lines():
+            if line.startswith("data: "):
+                events.append(json_module.loads(line[6:]))
+
+    types = [event["type"] for event in events]
+    assert types[0] == "meta", types
+    assert "context" in events[0] and events[0]["context"]["budgetTokens"] > 0
+    deltas = [event["content"] for event in events if event["type"] == "delta"]
+    assert "".join(deltas) == "计划：先抽取发票字段，再复核"
+    title_event = next((event for event in events if event["type"] == "title"), None)
+    assert title_event and title_event["title"] == "发票审核流程咨询"
+    done = events[-1]
+    assert done["type"] == "done"
+    assert done["assistantMessage"]["content"] == "计划：先抽取发票字段，再复核"
+    assert done["assistantMessage"]["role"] == "assistant"
+    assert done["conversation"]["messageCount"] == 2
+
+    # 落库校验：标题与消息均已持久化
+    detail = client.get(f"/api/v1/projects/leave-hub/conversations/{conversation_id}")
+    assert detail.status_code == 200
+    assert detail.json()["title"] == "发票审核流程咨询"
+    assert len(detail.json()["messages"]) == 2
+    # 长期记忆提取落库
+    episodic = [m for m in client.get("/api/v1/projects/leave-hub/memories", params={"memoryType": "episodic"}).json() if m.get("tags") and "conversation" in m["tags"]]
+    assert any("发票字段抽取方案" in m["content"] for m in episodic)
+
+
+def test_conversation_stream_reports_llm_not_configured_as_sse_error(client):
+    import json as json_module
+
+    created = client.post("/api/v1/projects/leave-hub/conversations", json={"agentKey": "project-manager"})
+    conversation_id = created.json()["id"]
+    events: list[dict] = []
+    with client.stream("POST", f"/api/v1/projects/leave-hub/conversations/{conversation_id}/messages/stream", json={"content": "你好"}) as response:
+        assert response.status_code == 200
+        for line in response.iter_lines():
+            if line.startswith("data: "):
+                events.append(json_module.loads(line[6:]))
+    assert events and events[-1]["type"] == "error"
+    assert events[-1]["code"] == "LLM_NOT_CONFIGURED"
+
+
+def test_conversation_agent_mode_with_stubbed_deepagents(client, monkeypatch):
+    """工具模式：DeepAgents 流式输出 → HITL 中断 → 人工审批 → 恢复执行 → 工作区文件。"""
+    import json as json_module
+
+    import app.services.conversation_agent as conversation_agent_module
+
+    class FakeState:
+        def __init__(self, interrupts=None, messages=None):
+            self.tasks = [type("T", (), {"interrupts": interrupts or []})()]
+            self.values = {"messages": messages or []}
+
+    class FakeChunk:
+        def __init__(self, text): self.content = text
+
+    class FakeDeepAgent:
+        def __init__(self):
+            self.config = None
+            self.invoked = False
+        def stream(self, input, config, stream_mode="messages"):
+            self.config = config
+            for text in ["我将先", "检查工作区", "并生成脚本。"]:
+                yield (FakeChunk(text), {})
+        def get_state(self, config):
+            if not self.invoked:
+                return FakeState(interrupts=[type("I", (), {"value": {"version": "v1.0", "summary": "对话产出的应用"}})()])
+            return FakeState(messages=[type("M", (), {"type": "ai", "content": "已按审批意见完成部署。"})()])
+        def invoke(self, command, config):
+            self.invoked = True
+            return {"messages": [type("M", (), {"type": "ai", "content": "已按审批意见完成部署。"})()]}
+
+    fake = FakeDeepAgent()
+    monkeypatch.setattr(conversation_agent_module, "create_deep_agent", lambda **kwargs: fake)
+    # 关键：无 Key 时 chat 模式会 503，但 fake 路径不走真实模型；给 settings 假 Key 以通过守卫
+    monkeypatch.setenv("LLM_API_KEY", "fake-key-for-stub-test")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+
+    created = client.post("/api/v1/projects/leave-hub/conversations", json={"agentKey": "project-manager"})
+    conversation_id = created.json()["id"]
+    # 切换到工具模式
+    switched = client.patch(f"/api/v1/projects/leave-hub/conversations/{conversation_id}", json={"mode": "agent"})
+    assert switched.status_code == 200 and switched.json()["mode"] == "agent"
+
+    events: list[dict] = []
+    with client.stream("POST", f"/api/v1/projects/leave-hub/conversations/{conversation_id}/messages/stream", json={"content": "请帮我做一个导出脚本并部署", "remember": False}) as response:
+        assert response.status_code == 200, response.text
+        for line in response.iter_lines():
+            if line.startswith("data: "):
+                events.append(json_module.loads(line[6:]))
+    types = [e["type"] for e in events]
+    assert types[0] == "meta" and events[0]["context"]["mode"] == "agent"
+    assert "".join(e["content"] for e in events if e["type"] == "delta") == "我将先检查工作区并生成脚本。"
+    interrupt_event = next(e for e in events if e["type"] == "interrupt")
+    assert interrupt_event["toolName"] == "pending_approval"
+    assert events[-1]["type"] == "done"
+
+    # 待审批列表
+    interrupts = client.get(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/interrupts")
+    assert interrupts.status_code == 200 and len(interrupts.json()) == 1
+    interrupt_id = interrupts.json()[0]["id"]
+
+    # 人工批准 → Agent 恢复执行
+    decided = client.post(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/interrupts/{interrupt_id}/decide", json={"decision": "approve", "reason": "可以发布"})
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["assistantMessage"]["content"] == "已按审批意见完成部署。"
+    assert fake.invoked is True
+
+    # 中断已消费
+    assert client.get(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/interrupts").json() == []
+
+    # 工作区文件（Agent 工作目录，仅返回文件清单）
+    workspace = client.get(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/workspace")
+    assert workspace.status_code == 200 and "files" in workspace.json()
+
+    # 无 Key 时工具模式明确报错（清理 fake key）
+    monkeypatch.delenv("LLM_API_KEY")
+    get_settings.cache_clear()
+    second = client.post(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/messages/stream", json={"content": "继续"})
+    events2 = [json_module.loads(line[6:]) for line in second.iter_lines() if line.startswith("data: ")]
+    assert events2[-1]["type"] == "error" and events2[-1]["code"] == "LLM_NOT_CONFIGURED"
+
+
+def test_conversation_requires_configured_llm(client):
+    created = client.post("/api/v1/projects/leave-hub/conversations", json={"agentKey": "project-manager"})
+    assert created.status_code == 201
+    conversation_id = created.json()["id"]
+    response = client.post(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/messages", json={"content": "你好"})
+    assert response.status_code == 503  # 未配置模型网关时明确报错，绝不 Mock 回复
+    assert "LLM_NOT_CONFIGURED" in response.text
+    # 标题重生成：无消息时先返回 409 业务错误（不依赖模型）
+    regen = client.post(f"/api/v1/projects/leave-hub/conversations/{conversation_id}/title")
+    assert regen.status_code == 409
+    assert "CONVERSATION_EMPTY" in regen.text
+
+
+def test_conversation_context_trimming_keeps_recent_and_drops_oldest():
+    from app.services.llm_client import estimate_tokens
+    from app.services.conversation import build_chat_context
+
+    assert estimate_tokens("你好世界") == 4
+    assert estimate_tokens("hello world") >= 2
+
+
+def test_agent_type_temperature_roundtrip_and_usage_aware_delete(client):
+    admin = client.post("/api/v1/auth/login", json={"email": "admin@company.com", "password": "Admin@2026"}).json()
+    headers = {"Authorization": f"Bearer {admin['accessToken']}"}
+
+    # temperature 回写
+    created = client.post("/api/v1/admin/agent-types", headers=headers, json={
+        "name": "usage-probe", "displayName": "引用探针", "description": "用于验证引用统计",
+        "systemPrompt": "你是引用探针。", "model": "deepseek-chat", "temperature": 0.7,
+        "tools": ["read_file"], "skills": [], "sandboxConfig": {},
+    })
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["temperature"] == 0.7
+    assert body["usage"]["pipelineNodes"] == 0 and body["usage"]["activeTasks"] == 0
+
+    # 更新 temperature
+    updated = client.patch(f"/api/v1/admin/agent-types/{body['id']}", headers=headers, json={"temperature": 0.9})
+    assert updated.status_code == 200 and updated.json()["temperature"] == 0.9
+
+    # 无引用的智能体可删除
+    assert client.delete(f"/api/v1/admin/agent-types/{body['id']}", headers=headers).status_code == 204
+
+    # 预置智能体被流程模板引用：列表返回 usage，删除返回 409 与模板名
+    agents = client.get("/api/v1/admin/agent-types", headers=headers).json()
+    referenced = next(item for item in agents if item["usage"]["pipelineNodes"] > 0)
+    assert referenced["usage"]["templateNames"], "usage 应包含引用模板名"
+    refused = client.delete(f"/api/v1/admin/agent-types/{referenced['id']}", headers=headers)
+    assert refused.status_code == 409
+    details = refused.json()["detail"]["details"]
+    assert details["pipelineNodes"] > 0 and isinstance(details["templateNames"], list) and details["templateNames"]
+
+
+def test_user_delete_with_project_reassignment(client):
+    admin = client.post("/api/v1/auth/login", json={"email": "admin@company.com", "password": "Admin@2026"}).json()
+    headers = {"Authorization": f"Bearer {admin['accessToken']}"}
+
+    # 林嘉拥有项目：不勾选移交 → 409
+    refused = client.delete("/api/v1/admin/users/user-linjia", headers=headers)
+    assert refused.status_code == 409
+    assert "projects" in refused.json()["detail"]["details"]
+
+    # 勾选移交 → 删除成功，项目归属管理员
+    assert client.request("DELETE", "/api/v1/admin/users/user-linjia", headers=headers, json={"reassign": True}).status_code == 204
+    projects = client.get("/api/v1/projects", headers=headers).json()
+    leave_hub = next(p for p in projects if p["id"] == "leave-hub")
+    assert leave_hub["owner"] == "周明远"
+
+    # 无项目的用户直接删除
+    created = client.post("/api/v1/admin/users", headers=headers, json={"email": "temp.user@company.com", "displayName": "临时用户", "department": "IT", "platformRole": "user"})
+    assert created.status_code == 201
+    assert client.delete(f"/api/v1/admin/users/{created.json()['user']['id']}", headers=headers).status_code == 204
+
+
 def test_requirement_document_attachment_and_clarification_persistence(client):
     saved = client.post("/api/v1/projects/leave-hub/requirements", json={"title": "增量需求", "contentMarkdown": "# 增量需求\n\n增加员工培训证书下载，并保留现有接口。", "structuredData": {"summary": "增加证书下载"}, "status": "confirmed", "changeSummary": "新增证书"})
     assert saved.status_code == 201
@@ -215,7 +628,7 @@ def test_skill_registry_loads_built_in_skills(client):
     response = client.get("/api/v1/skills")
     assert response.status_code == 200
     skills = response.json()
-    assert {item["name"] for item in skills} == {"requirement-analysis", "code-metrics", "regression-plan"}
+    assert {item["name"] for item in skills} == {"requirement-analysis", "code-metrics", "regression-plan", "ui-redesign"}
     assert all(item["executable"] for item in skills)
     assert all(len(item["checksum"]) == 64 for item in skills)
 
@@ -417,3 +830,69 @@ def test_real_agent_build_loop_with_scripted_model(client, monkeypatch, tmp_path
         assert queued_build["mode"] == "incremental"
     finally:
         object.__setattr__(settings, "agent_build_root", original_root)
+
+
+def test_langgraph_checkpointer_selection_and_semantic_rerank(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from app.services.deepagents_runtime import build_langgraph_checkpointer
+
+    # SQLite：默认返回 SqliteSaver
+    settings = SimpleNamespace(
+        database_url="sqlite:///./data/x.db",
+        langgraph_checkpoint_db=tmp_path / "cp.sqlite",
+    )
+    saver = build_langgraph_checkpointer(settings)
+    assert saver.__class__.__name__ == "SqliteSaver"
+    assert (tmp_path / "cp.sqlite").exists()
+
+    # PostgreSQL：连接失败时回退 SQLite 而不是抛异常
+    import psycopg
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **k: (_ for _ in ()).throw(ConnectionError("no server")))
+    pg_settings = SimpleNamespace(
+        database_url="postgresql+psycopg://user:pw@localhost:5432/db",
+        langgraph_checkpoint_db=tmp_path / "cp2.sqlite",
+    )
+    fallback = build_langgraph_checkpointer(pg_settings)
+    assert fallback.__class__.__name__ == "SqliteSaver"
+
+    # 语义重排：embedding 可用时混合排序；不可用时保持关键词顺序
+    from app.models import AgentMemory
+    from app.services.memory import MemoryService
+
+    def make(key: str, content: str, importance: float = 0.5) -> AgentMemory:
+        item = AgentMemory(agent_key="a", scope="project", memory_type="semantic", key=key, content=content, importance=importance)
+        item.id = key
+        return item
+
+    candidates = [make("export", "导出功能限制五万条"), make("unrelated", "公司食堂菜单")]
+    # 注入假 embedding 客户端
+    import app.services.memory as memory_module
+    import app.services.llm_client as llm_client_module
+
+    class FakeEmbedClient:
+        def embed_query(self, text: str):
+            if "导出" in text:
+                return [1.0, 0.0]
+            if "食堂" in text:
+                return [0.0, 1.0]
+            if "限制" in text or "菜单" in text:
+                return [0.9, 0.1] if "限制" in text else [0.1, 0.9]
+            return None
+
+    monkeypatch.setattr(llm_client_module, "OpenAICompatibleClient", lambda: FakeEmbedClient())
+    ranked = MemoryService._semantic_rerank(candidates, "导出功能")
+    assert ranked[0].key == "export"  # 语义相关者排前
+
+    # embedding 不可用：保持原顺序（不报错）
+    class NoEmbedClient:
+        def embed_query(self, text):
+            return None
+
+    monkeypatch.setattr(llm_client_module, "OpenAICompatibleClient", lambda: NoEmbedClient())
+    same = MemoryService._semantic_rerank(candidates, "导出功能")
+    assert [item.key for item in same] == ["export", "unrelated"]
+
+    # 余弦相似度纯函数
+    assert abs(MemoryService._cosine([1.0, 0.0], [1.0, 0.0]) - 1.0) < 1e-9
+    assert abs(MemoryService._cosine([1.0, 0.0], [0.0, 1.0])) < 1e-9

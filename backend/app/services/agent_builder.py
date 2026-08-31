@@ -107,7 +107,7 @@ class AgentBuildRunner:
 
                 if meta.get("engine") == "deepagents" and resume_stage not in {"frontend", "testing", "completed"}:
                     decision = meta.pop("hitlDecision", None)
-                    outcome = native_deepagents_runtime.invoke(db, build.project_id, build.id, workspace.root, build.requirement, decision)
+                    outcome = native_deepagents_runtime.invoke(db, build.project_id, build.id, workspace.root, build.requirement, decision, temperature=getattr(build, "temperature", 0.2))
                     if outcome.status == "waiting_approval":
                         build.status = "waiting_approval"
                         build.current_stage = "hitl"
@@ -288,7 +288,7 @@ class AgentBuildRunner:
         existing = workspace.source_snapshot(35_000) if incremental else "(new project)"
         instructions = self._consume_instructions(db, build)
         user = f"""Build mode: {'incremental modification' if incremental else 'new project'}\nProject requirement/change request:\n{build.requirement}\n\nHuman instructions received before planning:\n{instructions or '(none)'}\n\nExisting source snapshot:\n{existing}\n\nPersistent memory:\n{context['memory_prompt']}\n\nLoaded skills:\n{context['skill_prompt']}\n\nTarget stack: Vue 3 JavaScript + Vite frontend; FastAPI + Pydantic backend. Quality gates: backend coverage >=80%, frontend Vitest, and Vite production build."""
-        result = client.chat_json(system, user, temperature=0.1)
+        result = client.chat_json(system, user, temperature=getattr(build, "temperature", 0.2) or 0.2)
         required = {"app_name", "api_endpoints", "pages", "acceptance_criteria", "affected_files", "compatibility_notes"}
         if not required.issubset(result.data):
             raise AppError(422, "AGENT_PLAN_INVALID", "架构 Agent 返回的计划缺少必要字段", {"missing": sorted(required - result.data.keys())})
@@ -303,7 +303,7 @@ class AgentBuildRunner:
         instructions = self._consume_instructions(db, build)
         existing = workspace.source_snapshot(60_000) if incremental else "(baseline scaffold only)"
         user = f"""Mode: {'incremental' if incremental else 'initial'}\nRequirement:\n{build.requirement}\n\nArchitecture plan:\n{json.dumps(build.plan, ensure_ascii=False)}\n\nNew human instructions:\n{instructions or '(none)'}\n\nExisting source:\n{existing}\n\nMemory:\n{context['memory_prompt']}\n\nSkills:\n{context['skill_prompt']}\n\nTests run from backend with pytest-cov and must reach 80% coverage."""
-        return client.chat_json(system, user, temperature=0.05)
+        return client.chat_json(system, user, temperature=getattr(build, "temperature", 0.2) or 0.2)
 
     def _generate_frontend(self, db: Session, build: AgentBuild, client: ChatModel, workspace: GeneratedWorkspace) -> LLMResult:
         incremental = build.plan.get("_meta", {}).get("mode") == "incremental"
@@ -313,7 +313,7 @@ class AgentBuildRunner:
         instructions = self._consume_instructions(db, build)
         existing = workspace.source_snapshot(60_000) if incremental else "(baseline scaffold only)"
         user = f"""Mode: {'incremental' if incremental else 'initial'}\nRequirement:\n{build.requirement}\n\nArchitecture plan:\n{json.dumps(build.plan, ensure_ascii=False)}\n\nNew human instructions:\n{instructions or '(none)'}\n\nExisting source:\n{existing}\n\nMemory:\n{context['memory_prompt']}\n\nSkills:\n{context['skill_prompt']}\n\nQuality gates: npm install --ignore-scripts, npm run test, npm run build."""
-        return client.chat_json(system, user, temperature=0.1)
+        return client.chat_json(system, user, temperature=0.1)  # 修复阶段保持低温度稳定输出
 
     def _run_tests(self, db: Session, build: AgentBuild, workspace: GeneratedWorkspace) -> list[dict[str, Any]]:
         self._start_stage(db, build, "testing", 70 + min(build.attempt * 8, 20), f"测试 Agent 正在执行质量门禁（第 {build.attempt + 1} 轮）。")
@@ -357,7 +357,7 @@ class AgentBuildRunner:
         failures = [{"name": item["name"], "stdout": item["stdout"][-5000:], "stderr": item["stderr"][-5000:], "exitCode": item["exitCode"]} for item in results if not item["passed"]]
         system = """You are a code repair agent. Return ONLY JSON: {\"summary\": string, \"root_cause\": string, \"files\": [{\"path\": string, \"content\": string}]}. Diagnose the supplied pytest/npm failure and return complete replacement content ONLY for files that must change. Paths must start with backend/ or frontend/. Preserve working functionality. Do not use markdown fences."""
         user = f"""Requirement:\n{build.requirement}\n\nPlan:\n{json.dumps(build.plan, ensure_ascii=False)}\n\nFailed gates:\n{json.dumps(failures, ensure_ascii=False)}\n\nCurrent source files:\n{workspace.source_snapshot()}\n\nRelevant memory and skills:\n{context['memory_prompt']}\n{context['skill_prompt']}"""
-        return client.chat_json(system, user, temperature=0.05)
+        return client.chat_json(system, user, temperature=getattr(build, "temperature", 0.2) or 0.2)
 
     def _persist_generated_documents(self, db: Session, build: AgentBuild, workspace: GeneratedWorkspace) -> None:
         documents = {

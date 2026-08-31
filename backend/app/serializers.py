@@ -163,6 +163,7 @@ def agent_build_response(item: AgentBuild, include_logs: bool = True) -> AgentBu
         template=item.template,
         mode=meta.get("mode", "initial"),
         base_build_id=meta.get("baseBuildId"),
+        temperature=getattr(item, "temperature", 0.2),
         model=item.model,
         status=item.status,
         current_stage=item.current_stage,

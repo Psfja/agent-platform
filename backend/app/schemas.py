@@ -69,6 +69,41 @@ class SSOStatusResponse(APIModel):
     providers: list[str]
 
 
+class AdminUserCreate(APIModel):
+    email: str = Field(min_length=5, max_length=255)
+    display_name: str = Field(min_length=2, max_length=80)
+    department: str = Field(default="", max_length=120)
+    platform_role: Literal["super_admin", "platform_admin", "user"] = "user"
+    initial_password: str | None = Field(default=None, min_length=8, max_length=200)
+
+
+class AdminUserUpdate(APIModel):
+    display_name: str | None = Field(default=None, min_length=2, max_length=80)
+    department: str | None = Field(default=None, max_length=120)
+    platform_role: Literal["super_admin", "platform_admin", "user"] | None = None
+    is_active: bool | None = None
+    new_password: str | None = Field(default=None, min_length=8, max_length=200)
+
+
+class AdminUserResponse(APIModel):
+    id: str
+    email: str
+    display_name: str
+    department: str
+    platform_role: str
+    is_active: bool
+    auth_source: str
+    last_login_at: datetime | None
+    created_at: datetime
+    project_count: int
+    owned_projects: int
+
+
+class AdminUserCreatedResponse(APIModel):
+    user: AdminUserResponse
+    temp_password: str | None
+
+
 class LDAPLoginRequest(APIModel):
     username: str = Field(min_length=2, max_length=255)
     password: str = Field(min_length=1, max_length=200)
@@ -85,6 +120,7 @@ class AgentTypeCreate(APIModel):
     description: str = Field(min_length=2, max_length=5000)
     system_prompt: str = Field(min_length=2, max_length=100000)
     model: str = Field(min_length=2, max_length=160)
+    temperature: float = Field(default=0.2, ge=0, le=1.5)
     tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     sandbox_config: dict[str, Any] = Field(default_factory=dict)
@@ -96,10 +132,17 @@ class AgentTypeUpdate(APIModel):
     description: str | None = Field(default=None, min_length=2, max_length=5000)
     system_prompt: str | None = Field(default=None, min_length=2, max_length=100000)
     model: str | None = Field(default=None, min_length=2, max_length=160)
+    temperature: float | None = Field(default=None, ge=0, le=1.5)
     tools: list[str] | None = None
     skills: list[str] | None = None
     sandbox_config: dict[str, Any] | None = None
     is_active: bool | None = None
+
+
+class AgentTypeUsage(APIModel):
+    pipeline_nodes: int = 0
+    template_names: list[str] = Field(default_factory=list)
+    active_tasks: int = 0
 
 
 class AgentTypeResponse(APIModel):
@@ -109,12 +152,14 @@ class AgentTypeResponse(APIModel):
     description: str
     system_prompt: str
     model: str
+    temperature: float
     tools: list[str]
     skills: list[str]
     sandbox_config: dict[str, Any]
     version: int
     is_template: bool
     is_active: bool
+    usage: AgentTypeUsage
     created_at: datetime
     updated_at: datetime
 
@@ -539,6 +584,7 @@ class AgentBuildCreate(APIModel):
     deploy_environment: Literal["test", "production"] = "test"
     engine: Literal["deepagents", "staged"] | None = None
     model: str | None = Field(default=None, max_length=160)
+    temperature: float = Field(default=0.2, ge=0, le=1.5)
     max_fix_attempts: int = Field(default=2, ge=0, le=5)
     iteration_id: str | None = None
 
@@ -588,6 +634,7 @@ class AgentBuildResponse(APIModel):
     mode: str
     base_build_id: str | None
     model: str
+    temperature: float
     status: str
     current_stage: str
     progress: int
@@ -678,3 +725,70 @@ class DeploymentRuntimeStatusResponse(APIModel):
     ready: bool
     message: str
     running_deployments: int
+
+
+class ConversationCreate(APIModel):
+    agent_key: str = Field(min_length=2, max_length=80)
+    title: str = Field(default="", max_length=200)
+
+
+class ConversationUpdate(APIModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    mode: Literal["chat", "agent"] | None = None
+
+
+class ConversationMessageResponse(APIModel):
+    id: str
+    role: str
+    content: str
+    metadata: dict[str, Any]
+    created_at: datetime
+
+
+class ConversationResponse(APIModel):
+    id: str
+    project_id: str
+    agent_key: str
+    mode: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    last_message_at: datetime | None
+    message_count: int
+
+
+class ConversationDetailResponse(ConversationResponse):
+    messages: list[ConversationMessageResponse]
+
+
+class ConversationMessageCreate(APIModel):
+    content: str = Field(min_length=1, max_length=20000)
+    remember: bool = True
+
+
+class ChatTurnResponse(APIModel):
+    conversation: ConversationResponse
+    user_message: ConversationMessageResponse
+    assistant_message: ConversationMessageResponse
+    memories_used: list[MemoryResponse]
+    context: dict[str, Any]
+
+
+class InterruptDecideRequest(APIModel):
+    decision: Literal["approve", "edit", "reject"]
+    reason: str = Field(default="", max_length=2000)
+    edited_action: dict[str, Any] = Field(default_factory=dict)
+
+
+class InterruptResponse(APIModel):
+    id: str
+    conversation_id: str
+    tool_name: str
+    payload: dict[str, Any]
+    status: str
+    created_at: datetime
+
+
+class AgentDecisionResponse(APIModel):
+    conversation: ConversationResponse
+    assistant_message: ConversationMessageResponse
