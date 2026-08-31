@@ -334,3 +334,17 @@
   「列表视图」未实现项改为禁用并说明；登录页/侧边栏占位按钮均给出真实提示行为。
 - 验证：后端 31 → 33 passed；前端 62 → 64 passed；构建通过；
   端到端冒烟（temperature 回写 0.85、无引用删除 204、引用删除 409 详情、移交删除后项目归属变更）通过。
+
+### 第十轮（2026-08-22）：taste-skill 第二轮 UI 优化 + Windows 文档
+
+按 taste-skill redesign 的 Upgrade Techniques 追加实施（审计保持 18/18）：
+- Surface：全站胶片颗粒 overlay（SVG feTurbulence data-URI，opacity .045，pointer-events none）
+- Motion：页面标题与指标卡 stagger 进入动画（reduced-motion 自动禁用）；
+  html scroll-behavior: smooth（锚点平滑）
+- Spotlight：交互卡片统一 hover 发光（边框提亮 + 色相阴影 + 微抬升），
+  项目卡 hover 使用品牌色阴影
+- States：项目空间列表加载骨架卡（6 张 shimmer），并移除概览区残留假文案
+  （问候语/进行中数量/草稿数全部真实化）
+- 验证：审计 18/18；前端 64 passed；构建通过
+- README 新增「Windows 快速开始（PowerShell）」完整步骤（venv 激活/执行策略、
+  依赖安装、Docker Desktop、双终端启动、常见问题：端口占用/中文路径/生产部署）

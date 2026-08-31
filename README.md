@@ -338,6 +338,7 @@ agent-platform/
 - npm 10+
 - Python 3.11+
 - Docker 与 Docker Compose，可选但推荐
+- 操作系统：Linux / macOS / Windows 10/11（Windows 完整步骤见下方「Windows 快速开始」）
 
 ### 1. 安装前端依赖
 
@@ -400,6 +401,68 @@ npm run dev -- --host 0.0.0.0
 - ReDoc：`http://localhost:8000/redoc`
 - 健康检查：`http://localhost:8000/health`
 - Prometheus：`http://localhost:8000/metrics`
+
+### Windows 快速开始（PowerShell）
+
+> 建议使用 Windows 10/11 + PowerShell 7。若 `python` 不可用请从 Microsoft Store 或 python.org 安装，并在安装时勾选「Add python.exe to PATH」；Node.js 安装后同样需在 PATH 中。
+
+**1. 前端依赖**
+
+```powershell
+npm install
+```
+
+**2. 后端依赖与配置**
+
+```powershell
+cd backend
+python -m venv .venv
+.venv\Scripts\Activate.ps1          # 若提示禁止运行脚本，先执行：
+# Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+pip install -r requirements-dev.txt
+Copy-Item .env.example .env
+```
+
+> 若仍无法激活虚拟环境，可用不带激活的方式：直接使用 `.venv\Scripts\python.exe` 替代下文所有 `python`。
+
+**3. 基础设施（可选）**
+
+```powershell
+# 安装并启动 Docker Desktop 后执行：
+docker compose -f docker-compose.infrastructure.yml up -d
+```
+
+不启动也无需安装 Docker：开发环境自动降级为 SQLite + 本地文件 + 线程队列。
+
+**4. 启动 API（开两个终端分别运行）**
+
+```powershell
+cd backend
+.venv\Scripts\python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**5. 启动前端（另一个终端）**
+
+```powershell
+cd agent-platform                    # 回到仓库根目录
+npm run dev -- --host 0.0.0.0
+```
+
+**6. Redis Worker（可选）**
+
+```powershell
+cd backend
+.venv\Scripts\python -m app.worker
+```
+
+**访问地址与 Linux 一致**：前端 `http://localhost:4173`、Swagger `http://localhost:8000/docs`、健康检查 `http://localhost:8000/health`。
+
+**Windows 常见问题**
+
+- `npm install` 依赖安装失败：以管理员身份打开 PowerShell 后重试，或使用 `npm config set msvs_version` 指定构建工具（本项目依赖均为纯 JS/Python，通常不会遇到）。
+- 端口被占用（8000 / 4173）：`Get-NetTCPConnection -LocalPort 8000` 找到占用进程后 `Stop-Process -Id <PID>`。
+- 路径含空格/中文导致 Python 找不到模块：请使用纯英文路径克隆仓库（例如 `C:\dev\agent-platform`）。
+- 生产部署（Docker 双镜像、容器部署生成应用）在 Windows 上使用 Docker Desktop（WSL2 后端）即可，与 Linux 命令一致。
 
 ### 7. （可选）Docker 一键部署平台本体
 
