@@ -26,8 +26,8 @@ vi.mock('../../api/client', () => ({
 }))
 
 const USERS = [
-  { id: 'u1', email: 'admin@company.com', displayName: '周明远', department: '信息技术部', platformRole: 'super_admin', isActive: true, authSource: 'local', lastLoginAt: null, createdAt: '2026-08-19T00:00:00Z', projectCount: 2 },
-  { id: 'u2', email: 'lin.jia@company.com', displayName: '林嘉', department: '人力资源部', platformRole: 'user', isActive: false, authSource: 'local', lastLoginAt: '2026-08-19T08:00:00Z', createdAt: '2026-08-19T00:00:00Z', projectCount: 4 },
+  { id: 'u1', email: 'admin@company.com', displayName: '周明远', department: '信息技术部', platformRole: 'super_admin', isActive: true, authSource: 'local', lastLoginAt: null, createdAt: '2026-08-19T00:00:00Z', projectCount: 2, ownedProjects: 0 },
+  { id: 'u2', email: 'lin.jia@company.com', displayName: '林嘉', department: '人力资源部', platformRole: 'user', isActive: false, authSource: 'local', lastLoginAt: '2026-08-19T08:00:00Z', createdAt: '2026-08-19T00:00:00Z', projectCount: 4, ownedProjects: 2 },
 ]
 
 function mockAdminUsers() {
@@ -87,6 +87,18 @@ describe('UsersPage', () => {
     expect(deleteButtons[0].attributes('disabled')).toBeDefined()
   })
 
+  it('拥有项目的用户删除时展示移交选项', async () => {
+    vi.mocked(api.deleteAdminUser).mockResolvedValue(undefined)
+    const wrapper = await mountPage()
+    await wrapper.findAll('button.danger-ghost')[1].trigger('click')
+    expect(wrapper.text()).toContain('将其名下 2 个项目移交给我')
+    // 取消勾选后确认按钮禁用
+    const checkbox = wrapper.find('.reassign-option input')
+    await checkbox.setValue(false)
+    const confirm = wrapper.findAll('footer.dialog-foot button').find(button => button.text().includes('确认删除'))
+    expect(confirm!.attributes('disabled')).toBeDefined()
+  })
+
   it('删除流程：确认弹窗 → deleteAdminUser → 行移除', async () => {
     vi.mocked(api.deleteAdminUser).mockResolvedValue(undefined)
     const wrapper = await mountPage()
@@ -96,13 +108,13 @@ describe('UsersPage', () => {
     expect(confirm).toBeDefined()
     await confirm!.trigger('click')
     await flushPromises()
-    expect(vi.mocked(api.deleteAdminUser)).toHaveBeenCalledWith('u2')
+    expect(vi.mocked(api.deleteAdminUser)).toHaveBeenCalledWith('u2', true)
     await flushPromises()
     expect(wrapper.text()).not.toContain('lin.jia@company.com')
   })
 
   it('创建用户：填写表单 → createAdminUser → 展示一次性初始密码', async () => {
-    const created = { id: 'u3', email: 'new.hire@company.com', displayName: '新员工', department: 'IT', platformRole: 'user', isActive: true, authSource: 'local', lastLoginAt: null, createdAt: '2026-08-20T00:00:00Z', projectCount: 0 }
+    const created = { id: 'u3', email: 'new.hire@company.com', displayName: '新员工', department: 'IT', platformRole: 'user', isActive: true, authSource: 'local', lastLoginAt: null, createdAt: '2026-08-20T00:00:00Z', projectCount: 0, ownedProjects: 0 }
     vi.mocked(api.createAdminUser).mockResolvedValue({ user: created, tempPassword: 'Temp12345678' })
     const wrapper = await mountPage()
     await wrapper.find('button.button.primary').trigger('click')

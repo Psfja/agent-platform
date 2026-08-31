@@ -15,8 +15,8 @@ vi.mock('../../api/client', () => ({
 }))
 
 const AGENTS = [
-  { id: 'a1', name: 'backend-developer', displayName: '后端开发工程师', description: 'FastAPI 服务、业务逻辑与数据库访问实现', systemPrompt: 'prompt', model: 'deepseek-coder', tools: ['read_file', 'write_file', 'shell'], skills: ['code-metrics'], sandboxConfig: {}, version: 3, isTemplate: true, isActive: true, createdAt: '2026-08-19T00:00:00Z', updatedAt: '2026-08-19T00:00:00Z' },
-  { id: 'a2', name: 'test-engineer', displayName: '测试工程师', description: '单元、集成与回归测试生成及执行', systemPrompt: 'prompt', model: 'qwen-max', tools: ['shell'], skills: [], sandboxConfig: {}, version: 1, isTemplate: false, isActive: false, createdAt: '2026-08-19T00:00:00Z', updatedAt: '2026-08-19T00:00:00Z' },
+  { id: 'a1', name: 'backend-developer', displayName: '后端开发工程师', description: 'FastAPI 服务、业务逻辑与数据库访问实现', systemPrompt: 'prompt', model: 'deepseek-coder', temperature: 0.2, tools: ['read_file', 'write_file', 'shell'], skills: ['code-metrics'], sandboxConfig: {}, version: 3, isTemplate: true, isActive: true, usage: { pipelineNodes: 2, templateNames: ['Web 全栈应用'], activeTasks: 0 }, createdAt: '2026-08-19T00:00:00Z', updatedAt: '2026-08-19T00:00:00Z' },
+  { id: 'a2', name: 'test-engineer', displayName: '测试工程师', description: '单元、集成与回归测试生成及执行', systemPrompt: 'prompt', model: 'qwen-max', temperature: 0.2, tools: ['shell'], skills: [], sandboxConfig: {}, version: 1, isTemplate: false, isActive: false, usage: { pipelineNodes: 0, templateNames: [], activeTasks: 0 }, createdAt: '2026-08-19T00:00:00Z', updatedAt: '2026-08-19T00:00:00Z' },
 ]
 
 async function mountPage() {
@@ -60,23 +60,30 @@ describe('AgentTypesPage', () => {
     expect(wrapper.text()).toContain('v4')
   })
 
+  it('被模板引用的智能体：删除按钮禁用并展示引用信息', async () => {
+    const wrapper = await mountPage()
+    const deleteButtons = wrapper.findAll('button.danger-ghost')
+    expect(deleteButtons[0].attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('引用 2 节点')
+  })
+
   it('删除流程：确认弹窗 → deleteAgentType → 行移除', async () => {
     vi.mocked(api.deleteAgentType).mockResolvedValue(undefined)
     const wrapper = await mountPage()
-    await wrapper.findAll('button.danger-ghost')[0].trigger('click')
+    await wrapper.findAll('button.danger-ghost')[1].trigger('click')
     expect(wrapper.text()).toContain('删除智能体类型')
     const confirm = wrapper.findAll('footer.dialog-foot button').find(button => button.text().includes('确认删除'))
     await confirm!.trigger('click')
     await flushPromises()
-    expect(vi.mocked(api.deleteAgentType)).toHaveBeenCalledWith('a1')
+    expect(vi.mocked(api.deleteAgentType)).toHaveBeenCalledWith('a2')
     await flushPromises()
-    expect(wrapper.text()).not.toContain('backend-developer')
+    expect(wrapper.text()).not.toContain('测试工程师')
   })
 
   it('删除被引用智能体失败时保留行并提示', async () => {
     vi.mocked(api.deleteAgentType).mockRejectedValue(new Error('智能体类型正在被流程或任务使用'))
     const wrapper = await mountPage()
-    await wrapper.findAll('button.danger-ghost')[0].trigger('click')
+    await wrapper.findAll('button.danger-ghost')[1].trigger('click')
     const confirm = wrapper.findAll('footer.dialog-foot button').find(button => button.text().includes('确认删除'))
     await confirm!.trigger('click')
     await flushPromises()

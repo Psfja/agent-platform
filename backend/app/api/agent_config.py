@@ -11,7 +11,7 @@ from app.core.auth import audit, get_current_user, require_platform_admin
 from app.core.errors import AppError, conflict, not_found
 from app.database import get_db
 from app.models import AgentType, AgentTypeVersion, PipelineNode, PipelineTemplate, Task, User
-from app.schemas import AgentTypeCreate, AgentTypeResponse, AgentTypeUpdate, PipelineNodeInput, PipelineTemplateCreate, PipelineTemplateResponse
+from app.schemas import AgentTypeCreate, AgentTypeResponse, AgentTypeUpdate, AgentTypeUsage, PipelineNodeInput, PipelineTemplateCreate, PipelineTemplateResponse
 from app.services.llm_client import ChatModel, OpenAICompatibleClient
 from app.services.skill_loader import skill_registry
 
@@ -20,8 +20,29 @@ router = APIRouter(prefix="/admin", tags=["agent-and-pipeline-configuration"], d
 pipeline_llm_client_factory: Callable[[str], ChatModel] = lambda model: OpenAICompatibleClient(model=model)
 
 
-def agent_response(item: AgentType) -> AgentTypeResponse:
-    return AgentTypeResponse(id=item.id, name=item.name, display_name=item.display_name, description=item.description, system_prompt=item.system_prompt, model=item.model, tools=item.tools or [], skills=item.skills or [], sandbox_config=item.sandbox_config or {}, version=item.version, is_template=item.is_template, is_active=item.is_active, created_at=item.created_at, updated_at=item.updated_at)
+def agent_response(db: Session, item: AgentType) -> AgentTypeResponse:
+    """附带引用统计（流程节点 / 模板名 / 进行中任务），供前端判断可删除性与展示。"""
+    pipeline_nodes = db.scalar(select(func.count(PipelineNode.id)).where(PipelineNode.agent_type_id == item.id)) or 0
+    template_names: list[str] = []
+    if pipeline_nodes:
+        rows = db.scalars(
+            select(PipelineTemplate.display_name)
+            .join(PipelineNode, PipelineNode.template_id == PipelineTemplate.id)
+            .where(PipelineNode.agent_type_id == item.id)
+            .distinct()
+        ).all()
+        template_names = list(rows)
+    active_tasks = db.scalar(
+        select(func.count(Task.id)).where(Task.agent_type.ilike(f"%{item.name}%"), Task.status.in_(["pending", "in_progress", "paused"]))
+    ) or 0
+    return AgentTypeResponse(
+        id=item.id, name=item.name, display_name=item.display_name, description=item.description,
+        system_prompt=item.system_prompt, model=item.model, temperature=getattr(item, "temperature", 0.2),
+        tools=item.tools or [], skills=item.skills or [], sandbox_config=item.sandbox_config or {},
+        version=item.version, is_template=item.is_template, is_active=item.is_active,
+        usage=AgentTypeUsage(pipeline_nodes=pipeline_nodes, template_names=template_names, active_tasks=active_tasks),
+        created_at=item.created_at, updated_at=item.updated_at,
+    )
 
 
 def template_response(db: Session, item: PipelineTemplate) -> PipelineTemplateResponse:
@@ -37,7 +58,7 @@ def validate_skills(names: list[str]) -> None:
 
 @router.get("/agent-types", response_model=list[AgentTypeResponse])
 def list_agent_types(db: Session = Depends(get_db)) -> list[AgentTypeResponse]:
-    return [agent_response(item) for item in db.scalars(select(AgentType).order_by(AgentType.created_at)).all()]
+    return [agent_response(db, item) for item in db.scalars(select(AgentType).order_by(AgentType.created_at)).all()]
 
 
 @router.post("/agent-types", response_model=AgentTypeResponse, status_code=status.HTTP_201_CREATED)
@@ -46,7 +67,7 @@ def create_agent_type(payload: AgentTypeCreate, user: User = Depends(get_current
     validate_skills(payload.skills)
     item = AgentType(**payload.model_dump(), version=1)
     db.add(item); db.flush(); db.add(AgentTypeVersion(agent_type_id=item.id, version=1, snapshot=payload.model_dump(), changed_by=user.id)); db.commit(); db.refresh(item)
-    return agent_response(item)
+    return agent_response(db, item)
 
 
 @router.get("/agent-types/{agent_type_id}", response_model=AgentTypeResponse)
@@ -62,11 +83,11 @@ def update_agent_type(agent_type_id: str, payload: AgentTypeUpdate, user: User =
     if not item: raise not_found("智能体类型", agent_type_id)
     changes = payload.model_dump(exclude_unset=True)
     if "skills" in changes: validate_skills(changes["skills"] or [])
-    snapshot = agent_response(item).model_dump(mode="json")
+    snapshot = agent_response(db, item).model_dump(mode="json")
     item.version += 1
     for key, value in changes.items(): setattr(item, key, value)
     db.add(AgentTypeVersion(agent_type_id=item.id, version=item.version, snapshot={**snapshot, **changes}, changed_by=user.id)); db.commit(); db.refresh(item)
-    return agent_response(item)
+    return agent_response(db, item)
 
 
 @router.delete("/agent-types/{agent_type_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -74,8 +95,21 @@ def delete_agent_type(agent_type_id: str, db: Session = Depends(get_db)):
     item = db.get(AgentType, agent_type_id)
     if not item: raise not_found("智能体类型", agent_type_id)
     references = db.scalar(select(func.count(PipelineNode.id)).where(PipelineNode.agent_type_id == item.id)) or 0
-    active_tasks = db.scalar(select(func.count(Task.id)).where(Task.agent_type.ilike(f"%{item.display_name}%"), Task.status.in_(["pending", "in_progress", "paused"]))) or 0
-    if references or active_tasks: raise conflict("AGENT_TYPE_IN_USE", "智能体类型正在被流程或任务使用", pipelineNodes=references, activeTasks=active_tasks)
+    template_names: list[str] = []
+    if references:
+        template_names = list(db.scalars(
+            select(PipelineTemplate.display_name)
+            .join(PipelineNode, PipelineNode.template_id == PipelineTemplate.id)
+            .where(PipelineNode.agent_type_id == item.id)
+            .distinct()
+        ).all())
+    active_tasks = db.scalar(select(func.count(Task.id)).where(Task.agent_type.ilike(f"%{item.name}%"), Task.status.in_(["pending", "in_progress", "paused"]))) or 0
+    if references or active_tasks:
+        raise conflict(
+            "AGENT_TYPE_IN_USE",
+            f"智能体类型正在被 {len(template_names)} 个流程模板和 {active_tasks} 个进行中任务使用，无法删除",
+            pipelineNodes=references, templateNames=template_names, activeTasks=active_tasks,
+        )
     db.delete(item); db.commit(); return None
 
 

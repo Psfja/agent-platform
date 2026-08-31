@@ -8,7 +8,7 @@ import PageTitle from '../../components/PageTitle.vue'
 const app=useAppStore()
 const users=ref<AdminUserRecord[]>([]);const loading=ref(false);const search=ref('');const errorMessage=ref('');const currentUser=ref<AdminUserRecord|null>(null)
 const showAdd=ref(false);const adding=ref(false);const addError=ref('')
-const pendingDelete=ref<AdminUserRecord|null>(null);const deleting=ref(false)
+const pendingDelete=ref<AdminUserRecord|null>(null);const deleting=ref(false);const reassignProjects=ref(true)
 const resetTarget=ref<AdminUserRecord|null>(null);const resetPassword=ref('');const resetting=ref(false);const resetError=ref('')
 const draft=ref({email:'',displayName:'',department:'',platformRole:'user',initialPassword:''})
 const ROLE_OPTIONS=[{value:'user',label:'普通用户'},{value:'platform_admin',label:'平台管理员'},{value:'super_admin',label:'超级管理员'}]
@@ -30,7 +30,7 @@ async function add(){
   }catch(error){addError.value=error instanceof ApiError?error.message:error instanceof Error?error.message:'创建失败'}
   finally{adding.value=false}
 }
-async function remove(){if(!pendingDelete.value)return;deleting.value=true;try{const target=pendingDelete.value;await api.deleteAdminUser(target.id);users.value=users.value.filter(u=>u.id!==target.id);app.toast('用户已删除',`${target.displayName} 已从平台移除。`);pendingDelete.value=null}catch(error){app.toast('删除失败',error instanceof Error?error.message:'该用户仍拥有项目或为受保护账号')}finally{deleting.value=false}}
+async function remove(){if(!pendingDelete.value)return;deleting.value=true;try{const target=pendingDelete.value;await api.deleteAdminUser(target.id,reassignProjects.value);users.value=users.value.filter(u=>u.id!==target.id);app.toast('用户已删除',`${target.displayName} 已从平台移除${target.ownedProjects>0&&reassignProjects.value?`，其名下 ${target.ownedProjects} 个项目已移交给你`:''}。`);pendingDelete.value=null;reassignProjects.value=true}catch(error){app.toast('删除失败',error instanceof Error?error.message:'请确认项目移交或联系超级管理员')}finally{deleting.value=false}}
 async function doReset(){if(!resetTarget.value)return;resetting.value=true;resetError.value='';try{const updated=await api.updateAdminUser(resetTarget.value.id,{newPassword:resetPassword.value});replace(updated);app.toast('密码已重置',`${updated.displayName} 的新密码已生效。`);resetTarget.value=null;resetPassword.value=''}catch(error){resetError.value=error instanceof Error?error.message:'重置失败'}finally{resetting.value=false}}
 function lastLogin(item:AdminUserRecord):string{if(!item.lastLoginAt)return '从未登录';const minutes=Math.max(0,Math.floor((Date.now()-new Date(item.lastLoginAt).getTime())/60000));if(minutes<1)return '当前在线';if(minutes<60)return `${minutes} 分钟前`;if(minutes<1440)return `${Math.floor(minutes/60)} 小时前`;return `${Math.floor(minutes/1440)} 天前`}
 onMounted(load)
@@ -76,7 +76,7 @@ onMounted(load)
             <td><b>{{user.projectCount}}</b> 个</td>
             <td><span class="presence" :class="{online:user.lastLoginAt&&Date.now()-new Date(user.lastLoginAt).getTime()<5*60000}"><i></i>{{lastLogin(user)}}</span></td>
             <td><button class="toggle-control" :class="{on:user.isActive}" :disabled="user.id===currentUser?.id" @click="toggleActive(user)"><i></i></button></td>
-            <td><div class="row-actions"><button class="button subtle" @click="resetTarget=user;resetPassword='';resetError=''"><KeyRound :size="13"/>重置密码</button><button class="button danger-ghost" :disabled="user.id===currentUser?.id||user.platformRole==='super_admin'" @click="pendingDelete=user"><Trash2 :size="14"/></button></div></td>
+            <td><div class="row-actions"><button class="button subtle" @click="resetTarget=user;resetPassword='';resetError=''"><KeyRound :size="13"/>重置密码</button><button class="button danger-ghost" :disabled="user.id===currentUser?.id||user.platformRole==='super_admin'" :title="user.id===currentUser?.id?'不能删除当前账号':user.platformRole==='super_admin'?'超级管理员受保护':'删除该用户'" @click="pendingDelete=user;reassignProjects=true"><Trash2 :size="14"/></button></div></td>
           </tr>
           <tr v-if="!loading && !filtered.length"><td colspan="8" class="deployment-empty-row">没有匹配的用户</td></tr>
         </tbody>
@@ -102,10 +102,14 @@ onMounted(load)
       </section>
     </div>
     <div v-if="pendingDelete" class="modal-layer" @click.self="pendingDelete=null">
-      <section class="dialog" style="width:min(430px,calc(100vw - 50px))">
+      <section class="dialog" style="width:min(460px,calc(100vw - 50px))">
         <header class="dialog-head"><div><span class="dialog-kicker">DELETE USER</span><h2>删除平台用户</h2></div><button class="icon-button" @click="pendingDelete=null"><X :size="18"/></button></header>
-        <div class="dialog-body"><p class="dialog-text">确定删除 <b>{{pendingDelete.displayName}}</b>（{{pendingDelete.email}}）吗？仍拥有项目的用户无法删除。</p></div>
-        <footer class="dialog-foot"><span class="dialog-note">此操作不可撤销</span><div style="display:flex;gap:8px"><button class="button ghost" @click="pendingDelete=null">取消</button><button class="button danger-ghost" :disabled="deleting" @click="remove"><Trash2 :size="15"/>{{deleting?'删除中…':'确认删除'}}</button></div></footer>
+        <div class="dialog-body">
+          <p class="dialog-text">确定删除 <b>{{pendingDelete.displayName}}</b>（{{pendingDelete.email}}）吗？此操作不可撤销。</p>
+          <label v-if="pendingDelete.ownedProjects>0" class="reassign-option"><input type="checkbox" v-model="reassignProjects"/><span><Check :size="12"/></span><div><b>将其名下 {{pendingDelete.ownedProjects}} 个项目移交给我</b><small>不勾选则无法删除仍拥有项目的用户</small></div></label>
+          <div v-else class="smart-tip"><ShieldCheck :size="15"/><div><b>该用户未拥有项目</b><span>删除后其项目成员关系一并解除。</span></div></div>
+        </div>
+        <footer class="dialog-foot"><span class="dialog-note">删除与移交均写入审计日志</span><div style="display:flex;gap:8px"><button class="button ghost" @click="pendingDelete=null">取消</button><button class="button danger-ghost" :disabled="deleting||(pendingDelete.ownedProjects>0&&!reassignProjects)" @click="remove"><Trash2 :size="15"/>{{deleting?'删除中…':'确认删除'}}</button></div></footer>
       </section>
     </div>
     <div v-if="resetTarget" class="modal-layer" @click.self="resetTarget=null">

@@ -12,7 +12,7 @@ const isNew=computed(()=>route.params.id==='new')
 const tab=ref('basic');const loading=ref(false);const saving=ref(false);const errorMessage=ref('');const loadError=ref('')
 const agent=ref<AgentTypeRecord|null>(null)
 const skillsCatalog=ref<SkillRecord[]>([])
-const name=ref('');const displayName=ref('');const description=ref('');const model=ref('deepseek-chat');const systemPrompt=ref('')
+const name=ref('');const displayName=ref('');const description=ref('');const model=ref('deepseek-chat');const temperature=ref(0.2);const systemPrompt=ref('')
 const tools=ref<string[]>(['read_file','write_file','shell'])
 const skills=ref<string[]>([])
 const cpu=ref(2);const memory=ref(512);const timeout=ref(60);const isActive=ref(true)
@@ -30,13 +30,13 @@ const TOOL_OPTIONS=[
 const SKILL_LABELS:{[key:string]:string}={'requirement-analysis':'需求分析','code-metrics':'代码度量','regression-plan':'回归测试计划'}
 const MODEL_OPTIONS=['deepseek-chat','deepseek-coder','qwen-max','qwen-plus','glm-4-plus']
 
-function applyAgent(item:AgentTypeRecord){agent.value=item;name.value=item.name;displayName.value=item.displayName;description.value=item.description;model.value=item.model;systemPrompt.value=item.systemPrompt;tools.value=[...item.tools];skills.value=[...item.skills];cpu.value=Number(item.sandboxConfig?.cpu||2);memory.value=Number(item.sandboxConfig?.memoryMb||512);timeout.value=Number(item.sandboxConfig?.timeoutSeconds||60);isActive.value=item.isActive}
+function applyAgent(item:AgentTypeRecord){agent.value=item;name.value=item.name;displayName.value=item.displayName;description.value=item.description;model.value=item.model;temperature.value=item.temperature??0.2;systemPrompt.value=item.systemPrompt;tools.value=[...item.tools];skills.value=[...item.skills];cpu.value=Number(item.sandboxConfig?.cpu||2);memory.value=Number(item.sandboxConfig?.memoryMb||512);timeout.value=Number(item.sandboxConfig?.timeoutSeconds||60);isActive.value=item.isActive}
 function toggleItem(list:string[],key:string){const index=list.indexOf(key);if(index>=0)list.splice(index,1);else list.push(key)}
 async function load(){loading.value=true;loadError.value='';try{skillsCatalog.value=await api.skills();if(!isNew.value){const item=await api.agentType(String(route.params.id));applyAgent(item)}}catch(error){loadError.value=error instanceof Error?error.message:'无法加载配置'}finally{loading.value=false}}
 async function save(){
   saving.value=true;errorMessage.value=''
   const sandboxConfig={cpu:Number(cpu.value)||2,memoryMb:Number(memory.value)||512,timeoutSeconds:Number(timeout.value)||60}
-  const payload={displayName:displayName.value.trim(),description:description.value.trim(),systemPrompt:systemPrompt.value.trim(),model:model.value,tools:[...tools.value],skills:[...skills.value],sandboxConfig,isActive:isActive.value}
+  const payload={displayName:displayName.value.trim(),description:description.value.trim(),systemPrompt:systemPrompt.value.trim(),model:model.value.trim(),temperature:Number(temperature.value)||0.2,tools:[...tools.value],skills:[...skills.value],sandboxConfig,isActive:isActive.value}
   try{
     if(isNew.value){await api.createAgentType({name:name.value.trim(),...payload});app.toast('创建成功',`${displayName.value} 已创建为配置版本 v1。`)}
     else{const updated=await api.updateAgentType(String(route.params.id),payload);applyAgent(updated);app.toast('配置已保存',`${updated.displayName} 已更新为配置版本 v${updated.version}。`);router.push('/admin/agent-types')}
@@ -66,7 +66,8 @@ onMounted(load)
           <template v-if="tab==='basic'">
             <div class="form-field full"><label class="form-label">类型标识<em> *</em></label><input class="form-input" v-model="name" :disabled="!isNew" placeholder="backend-developer"/><p class="field-hint">{{isNew?'小写字母、数字与连字符，创建后不可修改':'类型标识创建后不可修改'}}</p></div>
             <div class="form-field"><label class="form-label">显示名称<em> *</em></label><input class="form-input" v-model="displayName" placeholder="后端开发工程师"/></div>
-            <div class="form-field"><label class="form-label">默认模型<em> *</em></label><select class="form-input" v-model="model"><option v-for="item in MODEL_OPTIONS" :key="item" :value="item">{{item}}</option></select></div>
+            <div class="form-field"><label class="form-label">默认模型<em> *</em></label><input class="form-input" v-model="model" list="model-suggestions" placeholder="例如 deepseek-chat、qwen-max"/><datalist id="model-suggestions"><option v-for="item in MODEL_OPTIONS" :key="item" :value="item">{{item}}</option></datalist><p class="field-hint">可输入任意 OpenAI 兼容模型名（推荐项仅作提示）</p></div>
+            <div class="form-field"><label class="form-label">Temperature（生成温度）</label><div class="range-control"><input type="range" min="0" max="1" step="0.05" v-model.number="temperature"/><b>{{temperature.toFixed(2)}}</b></div><p class="field-hint">低=稳定严谨，高=更具创造性；将实际用于对话与 Agent 调用</p></div>
             <div class="form-field full"><label class="form-label">职责说明<em> *</em></label><textarea class="form-textarea" v-model="description" placeholder="描述该智能体负责的工作范围与协作方式"/></div>
             <label class="form-field full toggle-row"><input type="checkbox" v-model="isActive"/><span class="toggle-control" :class="{on:isActive}"><i></i></span><div><b>启用该智能体类型</b><small>停用后无法在新流程模板中引用</small></div></label>
           </template>

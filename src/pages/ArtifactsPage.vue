@@ -12,7 +12,8 @@ const projectId=String(route.params.id)
 const artifacts=ref<ArtifactRecord[]>([]);const deployments=ref<ApplicationDeploymentRecord[]>([]);const loading=ref(false);const errorMessage=ref('');const query=ref('')
 const TYPE_LABELS:{[key:string]:string}={generated_app:'代码产物',report:'测试报告',image:'部署镜像',document:'项目文档'}
 const TYPE_ICONS:{[key:string]:unknown}={'generated_app':Code2,'report':FileCode2,'image':Box,'document':FileCode2}
-const filtered=computed(()=>artifacts.value.filter(a=>`${a.name}${a.type}`.toLowerCase().includes(query.value.toLowerCase())))
+const activeType=ref<string|null>(null)
+const filtered=computed(()=>artifacts.value.filter(a=>(!activeType.value||a.type===activeType.value)&&`${a.name}${a.type}`.toLowerCase().includes(query.value.toLowerCase())))
 const runningDeployment=computed(()=>deployments.value.find(d=>d.status==='running')||null)
 function fmtSize(bytes:number):string{if(bytes>=1024*1024)return `${(bytes/1024/1024).toFixed(1)} MB`;if(bytes>=1024)return `${(bytes/1024).toFixed(1)} KB`;return `${bytes} B`}
 async function load(){loading.value=true;errorMessage.value='';try{[artifacts.value,deployments.value]=await Promise.all([api.artifacts(projectId),api.applicationDeployments(projectId).catch(()=>[])])}catch(error){errorMessage.value=error instanceof Error?error.message:'无法加载产物列表'}finally{loading.value=false}}
@@ -36,8 +37,8 @@ onMounted(load)
       </div>
       <div class="artifact-layout">
         <aside class="artifact-nav">
-          <button class="active"><Code2 :size="17"/>全部产物<span>{{artifacts.length}}</span></button>
-          <button v-for="(label,type) in TYPE_LABELS" :key="type"><component :is="TYPE_ICONS[type]" :size="17"/>{{label}}<span>{{artifacts.filter(a=>a.type===type).length}}</span></button>
+          <button :class="{active:activeType===null}" @click="activeType=null"><Code2 :size="17"/>全部产物<span>{{artifacts.length}}</span></button>
+          <button v-for="(label,type) in TYPE_LABELS" :key="type" :class="{active:activeType===type}" @click="activeType=activeType===type?null:type as string"><component :is="TYPE_ICONS[type]" :size="17"/>{{label}}<span>{{artifacts.filter(a=>a.type===type).length}}</span></button>
         </aside>
         <section class="panel artifact-browser">
           <header class="panel-title"><div><h3>产物列表</h3><p>按构建时间倒序</p></div><div class="inline-search"><Search :size="15"/><input v-model="query" placeholder="搜索产物"/></div></header>

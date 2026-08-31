@@ -76,11 +76,11 @@ function mapIteration(item: ApiIteration): Iteration { return { ...item, date: n
 export interface AuthUser { id: string; email: string; displayName: string; platformRole: string; department: string; isActive: boolean; authSource: string; lastLoginAt: string | null }
 export interface AuthTokenResponse { accessToken: string; refreshToken: string; tokenType: string; expiresIn: number; user: AuthUser }
 export interface ProjectMemberRecord { id: string; userId: string; email: string; displayName: string; department: string; role: string; status: string; joinedAt: string }
-export interface AgentTypeRecord { id: string; name: string; displayName: string; description: string; systemPrompt: string; model: string; tools: string[]; skills: string[]; sandboxConfig: Record<string, any>; version: number; isTemplate: boolean; isActive: boolean; createdAt: string; updatedAt: string }
+export interface AgentTypeRecord { id: string; name: string; displayName: string; description: string; systemPrompt: string; model: string; temperature: number; tools: string[]; skills: string[]; sandboxConfig: Record<string, any>; version: number; isTemplate: boolean; isActive: boolean; usage: { pipelineNodes: number; templateNames: string[]; activeTasks: number }; createdAt: string; updatedAt: string }
 export interface PipelineNodeRecord { nodeKey: string; agentTypeId: string; displayName: string; dependsOn: string[]; executionMode: 'sequential' | 'parallel'; config: Record<string, unknown>; position: number }
 export interface PipelineTemplateRecord { id: string; name: string; displayName: string; description: string; templateType: string; version: number; isActive: boolean; isSystem: boolean; config: Record<string, unknown>; nodes: PipelineNodeRecord[]; createdAt: string; updatedAt: string }
 export interface PipelineDraftRecord { name: string; displayName: string; description: string; templateType: string; nodes: PipelineNodeRecord[] }
-export interface AdminUserRecord { id: string; email: string; displayName: string; department: string; platformRole: string; isActive: boolean; authSource: string; lastLoginAt: string | null; createdAt: string; projectCount: number }
+export interface AdminUserRecord { id: string; email: string; displayName: string; department: string; platformRole: string; isActive: boolean; authSource: string; lastLoginAt: string | null; createdAt: string; projectCount: number; ownedProjects: number }
 export interface MonitoringSummary {
   system: { cpuPercent: number; memoryPercent: number; diskPercent: number; loadAverage: number[] }
   projects: { total: number; active: number }
@@ -168,7 +168,7 @@ export interface SandboxRunRecord { id: string; projectId: string; taskId: strin
 export interface AgentContextRecord { projectId: string; agentKey: string; memories: MemoryRecord[]; skills: SkillRecord[]; memoryPrompt: string; skillPrompt: string; sandbox: SandboxStatus }
 export interface LLMBuildStatus { configured: boolean; provider: string; baseUrl: string; model: string; timeoutSeconds: number; supportsRealExecution: boolean; message: string; agentEngine:string; nativeDeepagents:boolean }
 export interface AgentBuildLog { id: string; stage: string; level: string; agentKey: string | null; message: string; metadata: Record<string, unknown>; createdAt: string }
-export interface AgentBuildRecord { id: string; projectId: string; iterationId: string | null; requirement: string; template: string; mode: 'initial' | 'incremental'; baseBuildId: string | null; model: string; status: string; currentStage: string; progress: number; plan: Record<string, any>; generatedFiles: { path: string; size: number; sha256?: string }[]; changedFilesCount: number; coverage: number | null; testResults: { name: string; command: string[]; passed: boolean; status: string; exitCode: number | null; stdout: string; stderr: string; elapsedMs: number; attempt: number; coverage?: number }[]; attempt: number; maxFixAttempts: number; promptTokens: number; completionTokens: number; workspacePath: string; artifactPath: string; errorMessage: string; cancellationRequested: boolean; startedAt: string | null; finishedAt: string | null; createdAt: string; updatedAt: string; logs: AgentBuildLog[] }
+export interface AgentBuildRecord { id: string; projectId: string; iterationId: string | null; requirement: string; template: string; mode: 'initial' | 'incremental'; baseBuildId: string | null; model: string; temperature: number; status: string; currentStage: string; progress: number; plan: Record<string, any>; generatedFiles: { path: string; size: number; sha256?: string }[]; changedFilesCount: number; coverage: number | null; testResults: { name: string; command: string[]; passed: boolean; status: string; exitCode: number | null; stdout: string; stderr: string; elapsedMs: number; attempt: number; coverage?: number }[]; attempt: number; maxFixAttempts: number; promptTokens: number; completionTokens: number; workspacePath: string; artifactPath: string; errorMessage: string; cancellationRequested: boolean; startedAt: string | null; finishedAt: string | null; createdAt: string; updatedAt: string; logs: AgentBuildLog[] }
 export interface AgentBuildFile { path: string; size: number; content?: string | null }
 export interface DeploymentRuntimeStatus { dockerAvailable: boolean; dockerVersion: string; ready: boolean; message: string; runningDeployments: number }
 export interface DeploymentRuntimeLog { id: string; stage: string; level: string; message: string; metadata: Record<string, unknown>; createdAt: string }
@@ -259,8 +259,8 @@ export const api = {
   deleteMemory(projectId: string, memoryId: string): Promise<void> { return request(`/projects/${projectId}/memories/${memoryId}`, { method: 'DELETE' }) },
   agentTypes(): Promise<AgentTypeRecord[]> { return request('/admin/agent-types') },
   agentType(id: string): Promise<AgentTypeRecord> { return request(`/admin/agent-types/${id}`) },
-  createAgentType(payload: { name: string; displayName: string; description: string; systemPrompt: string; model: string; tools: string[]; skills: string[]; sandboxConfig: Record<string, any>; isActive: boolean }): Promise<AgentTypeRecord> { return request('/admin/agent-types', { method: 'POST', body: JSON.stringify(payload) }) },
-  updateAgentType(id: string, payload: Partial<{ displayName: string; description: string; systemPrompt: string; model: string; tools: string[]; skills: string[]; sandboxConfig: Record<string, any>; isActive: boolean }>): Promise<AgentTypeRecord> { return request(`/admin/agent-types/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }) },
+  createAgentType(payload: { name: string; displayName: string; description: string; systemPrompt: string; model: string; temperature: number; tools: string[]; skills: string[]; sandboxConfig: Record<string, any>; isActive: boolean }): Promise<AgentTypeRecord> { return request('/admin/agent-types', { method: 'POST', body: JSON.stringify(payload) }) },
+  updateAgentType(id: string, payload: Partial<{ displayName: string; description: string; systemPrompt: string; model: string; temperature: number; tools: string[]; skills: string[]; sandboxConfig: Record<string, any>; isActive: boolean }>): Promise<AgentTypeRecord> { return request(`/admin/agent-types/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }) },
   deleteAgentType(id: string): Promise<void> { return request(`/admin/agent-types/${id}`, { method: 'DELETE' }) },
   pipelineTemplates(): Promise<PipelineTemplateRecord[]> { return request('/admin/pipeline-templates') },
   createPipelineTemplate(payload: { name: string; displayName: string; description: string; templateType: 'fullstack' | 'api' | 'frontend' | 'custom'; isActive: boolean; nodes: PipelineNodeRecord[] }): Promise<PipelineTemplateRecord> { return request('/admin/pipeline-templates', { method: 'POST', body: JSON.stringify(payload) }) },
@@ -269,7 +269,7 @@ export const api = {
   adminUsers(): Promise<AdminUserRecord[]> { return request('/admin/users') },
   createAdminUser(payload: { email: string; displayName: string; department: string; platformRole: string; initialPassword?: string }): Promise<{ user: AdminUserRecord; tempPassword: string | null }> { return request('/admin/users', { method: 'POST', body: JSON.stringify(payload) }) },
   updateAdminUser(id: string, payload: Partial<{ displayName: string; department: string; platformRole: string; isActive: boolean; newPassword: string }>): Promise<AdminUserRecord> { return request(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }) },
-  deleteAdminUser(id: string): Promise<void> { return request(`/admin/users/${id}`, { method: 'DELETE' }) },
+  deleteAdminUser(id: string, reassign = false): Promise<void> { return request(`/admin/users/${id}`, { method: 'DELETE', body: JSON.stringify({ reassign }) }) },
   monitoringSummary(): Promise<MonitoringSummary> { return request('/monitoring/summary') },
   integrationsStatus(): Promise<IntegrationsStatus> { return request('/integrations/status') },
   settingsStatus(): Promise<SettingsStatus> { return request('/settings/status') },
@@ -288,7 +288,7 @@ export const api = {
   },
   agentBuildStatus(): Promise<LLMBuildStatus> { return request('/agent-build/status') },
   agentBuilds(projectId: string): Promise<AgentBuildRecord[]> { return request(`/projects/${projectId}/agent-builds`) },
-  createAgentBuild(projectId: string, payload: { requirement: string; template: 'fullstack'; mode?: 'initial' | 'incremental'; baseBuildId?: string; autoDeploy?: boolean; deployEnvironment?: 'test' | 'production'; model?: string; maxFixAttempts: number; iterationId?: string }): Promise<AgentBuildRecord> {
+  createAgentBuild(projectId: string, payload: { requirement: string; template: 'fullstack'; mode?: 'initial' | 'incremental'; baseBuildId?: string; autoDeploy?: boolean; deployEnvironment?: 'test' | 'production'; model?: string; maxFixAttempts: number; temperature?: number; iterationId?: string }): Promise<AgentBuildRecord> {
     return request(`/projects/${projectId}/agent-builds`, { method: 'POST', body: JSON.stringify(payload) })
   },
   agentBuild(projectId: string, buildId: string): Promise<AgentBuildRecord> { return request(`/projects/${projectId}/agent-builds/${buildId}`) },

@@ -142,14 +142,14 @@
 
 ### 平台配置与外部集成
 
-- AgentType CRUD、Prompt、Model、Tools、Skills、Sandbox
-- AgentType 配置版本历史和使用中删除保护
+- AgentType CRUD、Prompt、Model、Tools、Skills、Sandbox 与真实 Temperature（0–1，实际作用于对话/Agent 调用）
+- AgentType 配置版本历史、引用统计（被哪些流程模板引用）与使用中删除保护（无引用可直接删除）
 - PipelineTemplate 与 PipelineNode CRUD
 - 节点依赖、顺序/并行模式和引用校验
 - 系统预置三套流程和需求关键词推荐
 - AI 流程生成：自然语言描述需求 → 模型网关生成流程草稿（引用真实 AgentType，自动清洗非法标识/无效引用/环依赖，无 Key 时明确报错不 Mock）
 - 流程图编排：SVG 流程图可视化；拖拽节点调整位置；从节点右侧把手拖到另一节点左侧把手建立依赖；点击连线删除；节点增删与自动布局；依赖面板勾选编辑；画布坐标随模板持久化
-- 平台用户管理：创建（一次性初始密码）、角色变更、启停、密码重置和删除保护
+- 平台用户管理：创建（一次性初始密码）、角色变更、启停、密码重置；删除时可将名下项目一键移交当前管理员
 - 智能体对话：每个智能体均有独立会话（按项目），支持长期记忆、上下文管理与多轮对话
 - 对话上下文：Agent 人设 + 按相关性召回的持久记忆 + 装配的 Skills 指令 + 历史消息（Token 预算自动裁剪旧消息）
 - 对话长期记忆：每轮对话自动提取值得记住的事实写入 Episodic 记忆（可开关），下次对话自动召回
@@ -757,15 +757,15 @@ cd backend
 
 当前结果：
 
-- 后端集成测试：`31 passed`
-- 前端单元测试：`62 passed`（API 客户端、路由守卫、OIDC 回调、管理页、流程图、对话面板/工具模式/审批）
+- 后端集成测试：`33 passed`
+- 前端单元测试：`64 passed`（API 客户端、路由守卫、OIDC 回调、管理页、流程图、对话面板/工具模式/审批、删除与移交流程）
 - 前端设计审计：`ui-redesign` Skill 18/18 项通过
 - Playwright E2E：登录导航、项目工作区、流程编排 3 组用例（`scripts/e2e.sh`；登录/导航类用例无需模型 Key，需可下载 Chromium 的网络环境）
 - 安全与验收脚手架：`scripts/security.sh`（Semgrep/Trivy/Syft）、`locustfile.py` 并发压测
 - TypeScript 检查：通过
 - Vite Production Build：通过
 - npm audit：`0 vulnerabilities`
-- Alembic：`0005_conversation_agent`，与 Head 一致
+- Alembic：`0006_agent_type_temperature`，与 Head 一致
 
 集成测试覆盖：
 

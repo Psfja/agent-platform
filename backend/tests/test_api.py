@@ -428,6 +428,59 @@ def test_conversation_context_trimming_keeps_recent_and_drops_oldest():
     assert estimate_tokens("hello world") >= 2
 
 
+def test_agent_type_temperature_roundtrip_and_usage_aware_delete(client):
+    admin = client.post("/api/v1/auth/login", json={"email": "admin@company.com", "password": "Admin@2026"}).json()
+    headers = {"Authorization": f"Bearer {admin['accessToken']}"}
+
+    # temperature 回写
+    created = client.post("/api/v1/admin/agent-types", headers=headers, json={
+        "name": "usage-probe", "displayName": "引用探针", "description": "用于验证引用统计",
+        "systemPrompt": "你是引用探针。", "model": "deepseek-chat", "temperature": 0.7,
+        "tools": ["read_file"], "skills": [], "sandboxConfig": {},
+    })
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["temperature"] == 0.7
+    assert body["usage"]["pipelineNodes"] == 0 and body["usage"]["activeTasks"] == 0
+
+    # 更新 temperature
+    updated = client.patch(f"/api/v1/admin/agent-types/{body['id']}", headers=headers, json={"temperature": 0.9})
+    assert updated.status_code == 200 and updated.json()["temperature"] == 0.9
+
+    # 无引用的智能体可删除
+    assert client.delete(f"/api/v1/admin/agent-types/{body['id']}", headers=headers).status_code == 204
+
+    # 预置智能体被流程模板引用：列表返回 usage，删除返回 409 与模板名
+    agents = client.get("/api/v1/admin/agent-types", headers=headers).json()
+    referenced = next(item for item in agents if item["usage"]["pipelineNodes"] > 0)
+    assert referenced["usage"]["templateNames"], "usage 应包含引用模板名"
+    refused = client.delete(f"/api/v1/admin/agent-types/{referenced['id']}", headers=headers)
+    assert refused.status_code == 409
+    details = refused.json()["detail"]["details"]
+    assert details["pipelineNodes"] > 0 and isinstance(details["templateNames"], list) and details["templateNames"]
+
+
+def test_user_delete_with_project_reassignment(client):
+    admin = client.post("/api/v1/auth/login", json={"email": "admin@company.com", "password": "Admin@2026"}).json()
+    headers = {"Authorization": f"Bearer {admin['accessToken']}"}
+
+    # 林嘉拥有项目：不勾选移交 → 409
+    refused = client.delete("/api/v1/admin/users/user-linjia", headers=headers)
+    assert refused.status_code == 409
+    assert "projects" in refused.json()["detail"]["details"]
+
+    # 勾选移交 → 删除成功，项目归属管理员
+    assert client.request("DELETE", "/api/v1/admin/users/user-linjia", headers=headers, json={"reassign": True}).status_code == 204
+    projects = client.get("/api/v1/projects", headers=headers).json()
+    leave_hub = next(p for p in projects if p["id"] == "leave-hub")
+    assert leave_hub["owner"] == "周明远"
+
+    # 无项目的用户直接删除
+    created = client.post("/api/v1/admin/users", headers=headers, json={"email": "temp.user@company.com", "displayName": "临时用户", "department": "IT", "platformRole": "user"})
+    assert created.status_code == 201
+    assert client.delete(f"/api/v1/admin/users/{created.json()['user']['id']}", headers=headers).status_code == 204
+
+
 def test_requirement_document_attachment_and_clarification_persistence(client):
     saved = client.post("/api/v1/projects/leave-hub/requirements", json={"title": "增量需求", "contentMarkdown": "# 增量需求\n\n增加员工培训证书下载，并保留现有接口。", "structuredData": {"summary": "增加证书下载"}, "status": "confirmed", "changeSummary": "新增证书"})
     assert saved.status_code == 201

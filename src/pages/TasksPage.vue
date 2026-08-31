@@ -37,7 +37,7 @@ onUnmounted(()=>events?.close())
     <div class="content-width task-page-head">
       <PageTitle title="任务执行" description="查看多智能体协作关系、任务状态和实时执行过程。">
         <button class="button secondary" @click="toggle"><Play v-if="paused" :size="16"/><Pause v-else :size="16"/>{{paused?'继续全部':'暂停全部'}}</button>
-        <button class="button primary" @click="app.toast('状态已同步','任务树已更新到最新状态。')"><RefreshCcw :size="16"/>刷新状态</button>
+        <button class="button primary" @click="reload(true)"><RefreshCcw :size="16"/>刷新状态</button>
       </PageTitle>
       <div class="task-summary-strip"><div><span class="pulse-dot"></span><strong>{{paused?'项目已暂停':'项目执行中'}}</strong><small>已连接实时事件</small></div><i></i><div><span>总体进度</span><b>{{stats.progress}}%</b></div><i></i><div><span>已完成</span><b>{{stats.done}}</b><small>/ {{stats.total}}</small></div><i></i><div><span>执行中</span><b class="indigo-text">{{stats.running}}</b></div><i></i><div><span>失败</span><b>{{stats.failed}}</b></div></div>
     </div>
@@ -45,7 +45,7 @@ onUnmounted(()=>events?.close())
     <div class="task-workspace">
       <section class="graph-area">
         <div class="graph-toolbar">
-          <div class="graph-filter"><button class="active"><Workflow :size="15"/>任务树</button><button @click="app.toast('视图切换','列表视图将在完整版本提供。')">列表</button></div>
+          <div class="graph-filter"><button class="active"><Workflow :size="15"/>任务树</button><button disabled title="列表视图将在完整版本提供">列表</button></div>
           <div class="graph-tools"><label class="switch-label"><input type="checkbox" v-model="showOnlyIncremental"/><i></i>仅看本次增量</label><span></span><button @click="zoom(-.1)"><ZoomOut :size="16"/></button><b>{{Math.round(scale*100)}}%</b><button @click="zoom(.1)"><ZoomIn :size="16"/></button><button @click="scale=1"><Focus :size="16"/>适应画布</button></div>
         </div>
         <div class="graph-canvas">

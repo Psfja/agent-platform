@@ -109,6 +109,17 @@ class ConversationAgentRuntime:
             max_retries=settings.llm_max_retries,
         )
 
+    def _model_for(self, temperature: float):
+        settings = get_settings()
+        return ChatOpenAI(
+            model=settings.llm_model,
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+            temperature=temperature,
+            timeout=settings.llm_timeout_seconds,
+            max_retries=settings.llm_max_retries,
+        )
+
     def _subagents(self, db: Session, model: ChatOpenAI) -> list[dict[str, Any]]:
         settings = get_settings()
         rows = db.scalars(select(AgentType).where(AgentType.is_active.is_(True))).all()
@@ -146,9 +157,10 @@ class ConversationAgentRuntime:
                 path = root / skill
                 if path.is_dir():
                     skill_paths.append(str(path))
+        temperature = getattr(agent, "temperature", 0.2) or 0.2
         deep_agent = create_deep_agent(
             name=f"conversation-{conversation.id[:8]}",
-            model=model,
+            model=self._model_for(temperature),
             tools=[run_python_in_sandbox, request_production_deployment],
             system_prompt=(
                 f"{agent.system_prompt}\n\n"

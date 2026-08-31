@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 import string
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Body, Depends, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -22,12 +22,13 @@ def _temp_password(length: int = 12) -> str:
 
 
 def user_response(db: Session, user: User) -> AdminUserResponse:
+    owned_projects = db.scalar(select(func.count(Project.id)).where(Project.owner_id == user.id)) or 0
     project_count = (
         db.scalar(
             select(func.count(func.distinct(ProjectMember.project_id))).where(ProjectMember.user_id == user.id, ProjectMember.status == "active")
         )
         or 0
-    ) + (db.scalar(select(func.count(Project.id)).where(Project.owner_id == user.id)) or 0)
+    ) + owned_projects
     return AdminUserResponse(
         id=user.id,
         email=user.email,
@@ -39,6 +40,7 @@ def user_response(db: Session, user: User) -> AdminUserResponse:
         last_login_at=user.last_login_at,
         created_at=user.created_at,
         project_count=project_count,
+        owned_projects=owned_projects,
     )
 
 
@@ -104,7 +106,8 @@ def update_user(user_id: str, payload: AdminUserUpdate, request: Request, actor:
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user(user_id: str, request: Request, actor: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_user(user_id: str, request: Request, payload: dict | None = Body(default=None), actor: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """删除用户；拥有项目时可选择将其项目移交当前管理员后删除（reassign=true）。"""
     item = db.get(User, user_id)
     if not item:
         raise not_found("平台用户", user_id)
@@ -112,10 +115,16 @@ def delete_user(user_id: str, request: Request, actor: User = Depends(get_curren
         raise conflict("USER_SELF_DELETE", "不能删除当前登录账号")
     if item.platform_role == "super_admin":
         raise conflict("USER_SUPER_ADMIN_PROTECTED", "超级管理员账号受保护，不能删除")
-    owned = db.scalar(select(func.count(Project.id)).where(Project.owner_id == item.id)) or 0
+    owned = list(db.scalars(select(Project).where(Project.owner_id == item.id)).all())
+    reassign = bool(payload and payload.get("reassign"))
+    if owned and not reassign:
+        raise conflict("USER_OWNS_PROJECTS", f"该用户仍拥有 {len(owned)} 个项目", projects=[p.name for p in owned][:10])
     if owned:
-        raise conflict("USER_OWNS_PROJECTS", "该用户仍拥有项目，请先移交项目所有权或归档项目", projects=owned)
-    audit(db, actor, "admin.user.delete", resource_type="user", resource_id=item.id, metadata={"email": item.email}, request=request)
+        for project in owned:
+            project.owner_id = actor.id
+            project.owner_name = actor.display_name
+            audit(db, actor, "project.ownership.transfer", project_id=project.id, resource_type="project", resource_id=project.id, metadata={"fromUserId": item.id}, request=request)
+    audit(db, actor, "admin.user.delete", resource_type="user", resource_id=item.id, metadata={"email": item.email, "reassignedProjects": len(owned)}, request=request)
     db.delete(item)
     db.commit()
     return None

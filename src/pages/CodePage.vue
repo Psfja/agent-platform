@@ -66,6 +66,7 @@ async function openFile(node:TreeNode){
 async function copy(){if(!fileContent.value)return;await navigator.clipboard?.writeText(fileContent.value);copied.value=true;window.setTimeout(()=>copied.value=false,1500)}
 function download(){if(selectedBuild.value)window.location.assign(api.agentBuildDownloadUrl(projectId,selectedBuild.value.id))}
 function fmtSize(bytes:number){return bytes>=1024?`${(bytes/1024).toFixed(1)} KB`:`${bytes} B`}
+async function pickBuild(id:string){const build=builds.value.find(b=>b.id===id);if(!build)return;selectedBuild.value=build;selectedPath.value='';fileContent.value=null;expanded.value={};if(tree.value.length)expanded.value[tree.value[0].path]=true}
 onMounted(load)
 </script>
 
@@ -79,7 +80,7 @@ onMounted(load)
       <div v-if="errorMessage" class="admin-empty"><p>{{errorMessage}}</p><button class="button secondary" @click="load">重试</button></div>
       <section v-else-if="selectedBuild" class="repo-summary">
         <div><span><Code2 :size="19"/></span><div><small>当前构建</small><strong>{{selectedBuild.mode==='incremental'?'增量':'初始'}}构建 · {{selectedBuild.model}}</strong></div></div>
-        <div class="repo-branch"><GitBranch :size="15"/><b>{{selectedBuild.id.slice(0,8)}}</b></div>
+        <select class="repo-branch-select" :value="selectedBuild.id" @change="pickBuild(($event.target as HTMLSelectElement).value)"><option v-for="build in builds" :key="build.id" :value="build.id">{{build.id.slice(0,8)}} · {{build.mode==='incremental'?'增量':'初始'}} · {{new Date(build.createdAt).toLocaleDateString('zh-CN')}}</option></select>
         <div class="commit-info"><History :size="15"/><code>{{selectedBuild.generatedFiles.length}} 个文件</code><span>{{selectedBuild.createdAt}}</span><small>覆盖率 {{selectedBuild.coverage??'—'}}%</small></div>
         <StatusBadge :status="selectedBuild.status"/>
       </section>

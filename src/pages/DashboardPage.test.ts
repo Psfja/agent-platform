@@ -25,7 +25,7 @@ const TASKS = [
   { id: 't1', parentId: null, name: '需求解析', agent: '需求分析智能体', agentShort: 'RA', status: 'completed', progress: 100, duration: '12m', startedAt: '今天 09:32', description: 'd' },
   { id: 't2', parentId: null, name: '回归测试', agent: '测试工程师智能体', agentShort: 'QA', status: 'in_progress', progress: 40, duration: '31m', startedAt: '今天 11:22', description: 'd' },
 ]
-const BUILDS = [{ id: 'b1', projectId: 'leave-hub', iterationId: null, requirement: 'r', template: 'fullstack', mode: 'incremental', baseBuildId: null, model: 'deepseek-chat', status: 'running', currentStage: 'testing', progress: 70, plan: {}, generatedFiles: [], changedFilesCount: 0, coverage: null, testResults: [], attempt: 0, maxFixAttempts: 5, promptTokens: 0, completionTokens: 0, workspacePath: '', artifactPath: '', errorMessage: '', cancellationRequested: false, startedAt: null, finishedAt: null, createdAt: '2026-08-20T10:00:00Z', updatedAt: '2026-08-20T10:00:00Z', logs: [] }]
+const BUILDS = [{ id: 'b1', projectId: 'leave-hub', iterationId: null, requirement: 'r', template: 'fullstack', mode: 'incremental', baseBuildId: null, model: 'deepseek-chat', temperature: 0.2, status: 'running', currentStage: 'testing', progress: 70, plan: {}, generatedFiles: [], changedFilesCount: 0, coverage: null, testResults: [], attempt: 0, maxFixAttempts: 5, promptTokens: 0, completionTokens: 0, workspacePath: '', artifactPath: '', errorMessage: '', cancellationRequested: false, startedAt: null, finishedAt: null, createdAt: '2026-08-20T10:00:00Z', updatedAt: '2026-08-20T10:00:00Z', logs: [] }]
 
 async function mountPage() {
   const wrapper = mount(DashboardPage, { global: { plugins: [createPinia()] } })

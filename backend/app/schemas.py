@@ -96,6 +96,7 @@ class AdminUserResponse(APIModel):
     last_login_at: datetime | None
     created_at: datetime
     project_count: int
+    owned_projects: int
 
 
 class AdminUserCreatedResponse(APIModel):
@@ -119,6 +120,7 @@ class AgentTypeCreate(APIModel):
     description: str = Field(min_length=2, max_length=5000)
     system_prompt: str = Field(min_length=2, max_length=100000)
     model: str = Field(min_length=2, max_length=160)
+    temperature: float = Field(default=0.2, ge=0, le=1.5)
     tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     sandbox_config: dict[str, Any] = Field(default_factory=dict)
@@ -130,10 +132,17 @@ class AgentTypeUpdate(APIModel):
     description: str | None = Field(default=None, min_length=2, max_length=5000)
     system_prompt: str | None = Field(default=None, min_length=2, max_length=100000)
     model: str | None = Field(default=None, min_length=2, max_length=160)
+    temperature: float | None = Field(default=None, ge=0, le=1.5)
     tools: list[str] | None = None
     skills: list[str] | None = None
     sandbox_config: dict[str, Any] | None = None
     is_active: bool | None = None
+
+
+class AgentTypeUsage(APIModel):
+    pipeline_nodes: int = 0
+    template_names: list[str] = Field(default_factory=list)
+    active_tasks: int = 0
 
 
 class AgentTypeResponse(APIModel):
@@ -143,12 +152,14 @@ class AgentTypeResponse(APIModel):
     description: str
     system_prompt: str
     model: str
+    temperature: float
     tools: list[str]
     skills: list[str]
     sandbox_config: dict[str, Any]
     version: int
     is_template: bool
     is_active: bool
+    usage: AgentTypeUsage
     created_at: datetime
     updated_at: datetime
 
@@ -573,6 +584,7 @@ class AgentBuildCreate(APIModel):
     deploy_environment: Literal["test", "production"] = "test"
     engine: Literal["deepagents", "staged"] | None = None
     model: str | None = Field(default=None, max_length=160)
+    temperature: float = Field(default=0.2, ge=0, le=1.5)
     max_fix_attempts: int = Field(default=2, ge=0, le=5)
     iteration_id: str | None = None
 
@@ -622,6 +634,7 @@ class AgentBuildResponse(APIModel):
     mode: str
     base_build_id: str | None
     model: str
+    temperature: float
     status: str
     current_stage: str
     progress: int

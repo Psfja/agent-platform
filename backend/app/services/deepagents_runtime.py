@@ -70,9 +70,9 @@ class DeepAgentsRuntime:
         self.checkpointer = build_langgraph_checkpointer(get_settings())
         self.lock = threading.RLock()
 
-    def invoke(self, db: Session, project_id: str, build_id: str, workspace: Path, requirement: str, resume_decision: dict | None = None) -> NativeAgentOutcome:
+    def invoke(self, db: Session, project_id: str, build_id: str, workspace: Path, requirement: str, resume_decision: dict | None = None, temperature: float = 0.2) -> NativeAgentOutcome:
         settings = get_settings()
-        model = ChatOpenAI(model=settings.llm_model, api_key=settings.llm_api_key, base_url=settings.llm_base_url, temperature=0.05, timeout=settings.llm_timeout_seconds, max_retries=settings.llm_max_retries)
+        model = ChatOpenAI(model=settings.llm_model, api_key=settings.llm_api_key, base_url=settings.llm_base_url, temperature=temperature or 0.2, timeout=settings.llm_timeout_seconds, max_retries=settings.llm_max_retries)
         context = agent_runtime.build_context(db, project_id, "project-manager", requirement)
         memory_path = workspace / "AGENTS.md"
         memory_path.write_text(f"# Persistent project context\n\n{context['memory_prompt']}\n", encoding="utf-8")
@@ -124,7 +124,15 @@ class DeepAgentsRuntime:
                 for skill in item.skills or []:
                     path = root / skill
                     if path.is_dir(): skill_paths.append(str(path))
-            result.append({"name": item.name, "description": item.description, "system_prompt": item.system_prompt, "model": model, "skills": skill_paths})
+            agent_model = model
+            temperature = getattr(item, "temperature", 0.2) or 0.2
+            if abs(temperature - 0.05) > 1e-9:
+                agent_model = ChatOpenAI(
+                    model=settings.llm_model, api_key=settings.llm_api_key,
+                    base_url=settings.llm_base_url, temperature=temperature,
+                    timeout=settings.llm_timeout_seconds, max_retries=settings.llm_max_retries,
+                )
+            result.append({"name": item.name, "description": item.description, "system_prompt": item.system_prompt, "model": agent_model, "skills": skill_paths})
         return result
 
 

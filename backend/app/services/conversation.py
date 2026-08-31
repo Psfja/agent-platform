@@ -206,7 +206,7 @@ class ConversationService:
         # 系统上下文 = Agent 人设 + 长期记忆召回 + Skill 指令
         system_context = f"{agent.system_prompt}\n\n{context['memory_prompt']}\n\n{context['skill_prompt']}"
         client = conversation_client_factory(agent.model)
-        reply = client.chat(system_context, messages, temperature=0.3)
+        reply = client.chat(system_context, messages, temperature=getattr(agent, "temperature", 0.2) or 0.2)
         if not reply:
             raise AppError(502, "LLM_EMPTY_REPLY", "模型未返回有效回复")
 
@@ -293,7 +293,7 @@ class ConversationService:
 
             chunks: list[str] = []
             try:
-                for chunk in client.chat_stream(system_context, messages, temperature=0.3):
+                for chunk in client.chat_stream(system_context, messages, temperature=getattr(agent, "temperature", 0.2) or 0.2):
                     chunks.append(chunk)
                     yield sse_event({"type": "delta", "content": chunk})
             except AppError as exc:

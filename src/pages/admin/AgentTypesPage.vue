@@ -62,9 +62,9 @@ onMounted(load)
             <td><div class="agent-desc-cell"><span>{{agent.description}}</span></div></td>
             <td><code class="model-chip">{{agent.model}}</code></td>
             <td><span class="role-chip">{{agent.tools.length}} 工具</span><span class="role-chip manager" style="margin-left:5px">{{agent.skills.length}} Skills</span></td>
-            <td><code>v{{agent.version}}</code><small v-if="agent.isTemplate" style="margin-left:6px" class="role-chip owner">预置</small></td>
+            <td><code>v{{agent.version}}</code><small v-if="agent.isTemplate" style="margin-left:6px" class="role-chip owner">预置</small><small v-if="agent.usage.pipelineNodes>0" style="margin-left:6px" class="role-chip" :title="`被 ${agent.usage.templateNames.join('、')} 引用`">引用 {{agent.usage.pipelineNodes}} 节点</small></td>
             <td><button class="toggle-control" :class="{on:agent.isActive}" :title="agent.isActive?'停用':'启用'" @click="toggle(agent)"><i></i></button></td>
-            <td><div class="row-actions"><button class="button subtle" @click="router.push(`/admin/agent-types/${agent.id}`)">配置</button><button class="button danger-ghost" @click="pendingDelete=agent"><Trash2 :size="14"/></button></div></td>
+            <td><div class="row-actions"><button class="button subtle" @click="router.push(`/admin/agent-types/${agent.id}`)">配置</button><button class="button danger-ghost" :disabled="agent.usage.pipelineNodes>0||agent.usage.activeTasks>0" :title="agent.usage.pipelineNodes>0?`被 ${agent.usage.templateNames.join('、')} 引用，无法删除`:agent.usage.activeTasks>0?'有进行中任务，无法删除':'删除该智能体类型'" @click="pendingDelete=agent"><Trash2 :size="14"/></button></div></td>
           </tr>
           <tr v-if="!loading && !filtered.length"><td colspan="7" class="deployment-empty-row">没有匹配的智能体类型</td></tr>
         </tbody>
@@ -73,7 +73,7 @@ onMounted(load)
     <div v-if="pendingDelete" class="modal-layer" @click.self="pendingDelete=null">
       <section class="dialog" style="width:min(430px,calc(100vw - 50px))">
         <header class="dialog-head"><div><span class="dialog-kicker">DELETE AGENT TYPE</span><h2>删除智能体类型</h2></div><button class="icon-button" @click="pendingDelete=null"><X :size="18"/></button></header>
-        <div class="dialog-body"><p class="dialog-text">确定删除 <b>{{pendingDelete.displayName}}</b>（{{pendingDelete.name}}）吗？被流程模板或运行中任务引用的智能体无法删除，配置版本历史将一并移除。</p></div>
+        <div class="dialog-body"><p class="dialog-text">确定删除 <b>{{pendingDelete.displayName}}</b>（{{pendingDelete.name}}）吗？该智能体未被任何流程模板或任务引用，删除后配置版本历史将一并移除。</p></div>
         <footer class="dialog-foot"><span class="dialog-note">此操作不可撤销</span><div style="display:flex;gap:8px"><button class="button ghost" @click="pendingDelete=null">取消</button><button class="button danger-ghost" :disabled="deleting" @click="remove"><Trash2 :size="15"/>{{deleting?'删除中…':'确认删除'}}</button></div></footer>
       </section>
     </div>

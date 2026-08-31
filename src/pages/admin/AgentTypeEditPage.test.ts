@@ -24,7 +24,7 @@ const SKILLS = [
   { name: 'code-metrics', displayName: '代码度量', version: '1.0.0', description: '度量代码', entrypoint: 'main.py', instructions: 'i', agentTypes: [], tags: [], inputSchema: {}, path: '/skills/code-metrics', executable: true, checksum: 'def' },
 ]
 
-const EXISTING = { id: 'a1', name: 'backend-developer', displayName: '后端开发工程师', description: 'FastAPI 服务开发', systemPrompt: '你是后端工程师。', model: 'deepseek-coder', tools: ['read_file'], skills: ['code-metrics'], sandboxConfig: { cpu: 2, memoryMb: 512 }, version: 3, isTemplate: true, isActive: true, createdAt: '2026-08-19T00:00:00Z', updatedAt: '2026-08-19T00:00:00Z' }
+const EXISTING = { id: 'a1', name: 'backend-developer', displayName: '后端开发工程师', description: 'FastAPI 服务开发', systemPrompt: '你是后端工程师。', model: 'deepseek-coder', temperature: 0.2, tools: ['read_file'], skills: ['code-metrics'], sandboxConfig: { cpu: 2, memoryMb: 512 }, version: 3, isTemplate: true, isActive: true, usage: { pipelineNodes: 0, templateNames: [], activeTasks: 0 }, createdAt: '2026-08-19T00:00:00Z', updatedAt: '2026-08-19T00:00:00Z' }
 
 async function mountPage() {
   const wrapper = mount(AgentTypeEditPage, { global: { plugins: [createPinia()] } })

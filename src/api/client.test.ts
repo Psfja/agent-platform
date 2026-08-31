@@ -90,7 +90,7 @@ describe('api 请求路径与方法', () => {
 
   it('createAgentType / updateAgentType / deleteAgentType', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ id: 't1' }))
-    await api.createAgentType({ name: 'sec', displayName: '安全', description: 'desc', systemPrompt: 'p', model: 'm', tools: [], skills: [], sandboxConfig: {}, isActive: true })
+    await api.createAgentType({ name: 'sec', displayName: '安全', description: 'desc', systemPrompt: 'p', model: 'm', temperature: 0.2, tools: [], skills: [], sandboxConfig: {}, isActive: true })
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/admin/agent-types', expect.objectContaining({ method: 'POST' }))
     await api.updateAgentType('t1', { isActive: false })
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/admin/agent-types/t1', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ isActive: false }) }))
